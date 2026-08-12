@@ -1,0 +1,42 @@
+{{- define "helm-framework.deployment.service" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "helm-framework.fullname" . }}
+  {{- if (.Values.service).annotations }}
+  {{- with (.Values.service).annotations }}
+  annotations:
+      {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  labels:
+    {{- include "helm-framework.labels" . | nindent 4 }}
+spec:
+  type: {{ include "helm-framework.values.service.type" . }}
+  {{- if (.Values.service).externalTrafficPolicy }}
+  externalTrafficPolicy: {{ .Values.service.externalTrafficPolicy }}
+  {{- end }}
+  {{- if (.Values.service).sessionAffinity }}
+  sessionAffinity: {{ .Values.service.sessionAffinity }}
+  {{- if and (eq .Values.service.sessionAffinity "ClientIP") (((.Values.service).sessionAffinityConfig).clientIPTimeoutSeconds) }}
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: {{ .Values.service.sessionAffinityConfig.clientIPTimeoutSeconds }}
+  {{- end }}
+  {{- end }}
+  ports:
+    - port: {{ (include "helm-framework.values.service.port" .) }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    {{- range $sc := .Values.sidecars }}
+    {{- if $sc.enabled }}
+    - port: {{ include "helm-framework.values.service.port" $sc }}
+      targetPort: {{ include "helm-framework.sidecar.portName" $sc }}
+      protocol: TCP
+      name: {{ include "helm-framework.sidecar.portName" $sc }}
+    {{- end }}
+    {{- end }}
+  selector:
+    {{- include "helm-framework.selectorLabels" . | nindent 4 }}
+{{- end }}

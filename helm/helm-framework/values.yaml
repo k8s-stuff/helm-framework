@@ -1,0 +1,786 @@
+# This file documents the values contract for helm-framework, a template
+# library chart: consumers `include` its templates directly against their own
+# root context, so this values.yaml is reference documentation only and is
+# never merged into any consumer's .Values. A values.schema.json placed here
+# would likewise validate nothing (Helm would check it against the namespaced
+# `helm-framework.*` subchart scope, which templates never read). Each
+# consuming chart should copy the relevant keys into its own values.yaml and,
+# if it wants structural validation, add its own values.schema.json — see
+# helm-framework-test-template/values.schema.json for a working example.
+
+# =============================================================================
+# GLOBAL CONFIGURATION
+# =============================================================================
+
+# -- Number of pod replicas (ignored when the HPA or KEDA is enabled).
+replicaCount: 1
+# -- When true, adds a randomized pod annotation on each render so the Deployment restarts its pods, even when nothing else changed.
+forceReload: false
+# -- Deployment update strategy (spec.strategy). Empty uses the cluster default.
+strategy: {}
+  # type: RollingUpdate
+  # rollingUpdate:
+  #   maxSurge: 0
+  #   maxUnavailable: 1
+
+# -- Override the chart name used in resource names and labels.
+nameOverride: ""
+# -- Override the full release name used for resource names.
+fullnameOverride: ""
+
+# -- Image pull secrets for private registries.
+imagePullSecrets: []
+
+# =============================================================================
+# CONTAINER IMAGES
+# =============================================================================
+
+# -- Main application container image. If overriding `tag` with a mutable tag
+# (e.g. `latest` or a moving environment tag), also set `pullPolicy: Always` —
+# `IfNotPresent` will keep serving a stale/cached image on that node otherwise.
+image:
+  repository: alpine
+  pullPolicy: IfNotPresent
+  tag: "1.0.0"
+
+# -- Override the main container's entrypoint. Empty uses the image's own
+# ENTRYPOINT. Useful when several releases of this chart share one image but
+# each needs to run a different process (e.g. an API server vs. a background
+# worker) — set `command`/`args` per release instead of building distinct
+# images.
+command: []
+# -- Override the main container's default command arguments. Empty uses the
+# image's own CMD (or nothing, if `command` above is also set).
+args: []
+
+# -- Init containers: optional CA-bundle build and wait-for-job (the BUILT-IN
+# ones — a single object, not a list). For EXTRA user-supplied init containers
+# use the plural `initContainers` list below instead; the two keys are
+# unrelated despite the similar name.
+initContainer:
+  caBundle:
+    enabled: false
+    trustedCertificateAuthorities: {}
+  # -- wait-for-job init container. Renders automatically when one or more jobs
+  # are flagged with `waitForIt: true` (see `jobs` below); a single init
+  # container then blocks pod startup until every flagged job completes. No
+  # separate enable switch is needed — the per-job `waitForIt` flag is the only
+  # trigger. Providing `command`/`args` overrides the generated `kubectl wait`
+  # invocation entirely.
+  waitFor:
+    image:
+      repository: alpine/kubectl
+      tag: "1.34.1"
+      pullPolicy: IfNotPresent
+    # Timeout passed to the generated `kubectl wait` (ignored when custom args are set).
+    timeout: "600s"
+    command: []
+    args: []
+
+# -- Extra custom init containers (list; raw Kubernetes container specs, rendered
+# through `tpl`). Appended after the built-in CA-bundle / wait-for-job init
+# containers (the singular `initContainer` above). Empty by default.
+initContainers: []
+#  - name: wait-for-db
+#    image: busybox:1.28
+#    command: ['sh', '-c', 'until nc -z mydb 5432; do echo waiting; sleep 2; done;']
+#  - name: setup-permissions
+#    image: alpine:latest
+#    command: ['sh', '-c', 'chmod -R 755 /data']
+#    volumeMounts:
+#      - name: data
+#        mountPath: /data
+
+# =============================================================================
+# POD & DEPLOYMENT CONFIGURATION
+# =============================================================================
+
+# -- ServiceAccount creation and reference. `automount` shown here (false) is
+# only the fallback: the template overrides it to true whenever a job is
+# flagged `waitForIt: true`, since the wait-for-job init container needs the
+# ServiceAccount token to call the Kubernetes API (see the auto-provisioned
+# RBAC Role/RoleBinding under `rbac` below). Set `automount` explicitly to
+# force one behavior or the other regardless of `waitForIt`.
+serviceAccount:
+  create: false
+  automount: false
+  annotations: {}
+  name: ""
+
+# -- RBAC Role + RoleBinding for this workload's ServiceAccount. When enabled,
+# the RoleBinding is wired automatically to the created Role and the resolved
+# serviceAccount (created one, `serviceAccount.name`, or "default").
+# NOTE: when any job is flagged `waitForIt: true`, a dedicated
+# `<fullname>-wait-for-jobs` Role + RoleBinding are created automatically
+# (regardless of `create` / `roleRef`) granting `get/list/watch` on
+# `batch/jobs` to the pod's ServiceAccount, so the wait-for-job init container
+# can read job status. These are separate, additive resources — they layer on
+# top of any custom `roleRef` rather than overriding it.
+rbac:
+  create: false
+  labels: {}
+  annotations: {}
+  # roleName: ""       # defaults to <fullname>-role
+  # Role rules — fully user-defined, no defaults. Required when create is true
+  # (unless roleRef is set). Empty renders a Role that grants nothing.
+  rules: []
+    # - apiGroups: [""]
+    #   resources: ["pods", "services"]
+    #   verbs: ["get", "list", "watch"]
+    # - apiGroups: ["batch"]
+    #   resources: ["jobs"]
+    #   verbs: ["get", "list", "watch"]
+  # Bind to an existing (Cluster)Role instead of creating one. When set, no
+  # Role is created and `rules` is ignored.
+  roleRef: {}
+    # apiGroup: rbac.authorization.k8s.io
+    # kind: ClusterRole
+    # name: my-existing-role
+
+# -- Extra annotations added to the pod template.
+podAnnotations: {}
+# -- Extra labels added to the pod template (e.g. sidecar.istio.io/inject: "true").
+podLabels: {}
+
+# -- Pod-level security context. No baseline is forced by the chart — this
+# renders exactly what you set here (empty object if left empty). A hardened
+# baseline would need to assume the image's user and target platform (vanilla
+# Kubernetes vs. OpenShift's per-namespace SCC UID ranges), which the chart
+# can't do generically. Set fields explicitly for a hardened posture, e.g.:
+podSecurityContext: {}
+  # fsGroup: 2000
+  # runAsNonRoot: true
+
+# -- Container-level security context (applied to all containers). Same
+# no-defaults behavior as podSecurityContext above — renders exactly what you
+# set, nothing merged in. Set fields explicitly as needed, e.g.:
+securityContext: {}
+  # allowPrivilegeEscalation: false
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+  # capabilities:
+  #   drop:
+  #   - ALL
+
+# -- Additional entries for the pod's /etc/hosts.
+hostAliases: []
+# - ip: "1.2.3.4"
+#   hostnames:
+#   - "exmaple.com"
+
+# =============================================================================
+# NETWORKING
+# =============================================================================
+
+# -- Service exposing the workload. `sessionAffinity: "ClientIP"` enables
+# sticky sessions, optionally tuned with
+# `sessionAffinityConfig.clientIPTimeoutSeconds` (Kubernetes defaults to
+# 10800s/3h when ClientIP affinity is set without a timeout).
+# `externalTrafficPolicy` controls client-IP preservation for
+# `NodePort`/`LoadBalancer` service types.
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+  targetScheme: HTTP
+  annotations: {}
+  sessionAffinity: ""
+  sessionAffinityConfig:
+    clientIPTimeoutSeconds: 0
+  externalTrafficPolicy: ""
+
+# -- Kubernetes Ingress configuration.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+# -- Istio VirtualService. Use `paths` for simple routing, or `http`/`tls`/`tcp` for full control.
+virtualService:
+  enabled: false
+  # apiVersion of the VirtualService CRD. Defaults to v1beta1 (served by every
+  # Istio since 1.6). Set to networking.istio.io/v1 on Istio >= 1.22.
+  # apiVersion: networking.istio.io/v1beta1
+  labels: {}
+  annotations: {}
+  # gateways/hosts accept a string or a list.
+  gateways:
+    - ingress-gateway
+  hosts:
+    - example.com
+  # exportTo: ["."]
+
+  # Default rewrite applied to any path that doesn't set its own rewriteUri.
+  rewriteUri: "/"
+
+  # Ergonomic HTTP route shortcut — each entry becomes one route to this
+  # chart's Service. For anything advanced, use `http` below instead.
+  paths:
+    - path: "/"
+      # matchType: prefix        # prefix | exact | regex
+      # rewriteUri: "/"
+      # timeout: 5s
+      # retries:
+      #   attempts: 3
+      #   perTryTimeout: 2s
+      # destination:             # override target (defaults to this Service)
+      #   host: other-service
+      #   port: 8080
+      #   subset: v1
+      #   weight: 100
+
+  # Raw route passthrough (1:1 with the CRD). When `http` is set it REPLACES
+  # the `paths` shortcut entirely. `tls`/`tcp` are always appended.
+  http: []
+  tls: []
+  tcp: []
+
+# -- Gateway API HTTPRoute. Use `paths` for simple routing, or `rules` for full control.
+httpRoute:
+  enabled: false
+  # apiVersion of the HTTPRoute CRD. Defaults to the GA v1 API (Gateway API
+  # >= 1.0). Set to gateway.networking.k8s.io/v1beta1 for older clusters.
+  # apiVersion: gateway.networking.k8s.io/v1beta1
+  labels: {}
+  annotations: {}
+  # parentRefs accept a string (Gateway name) or a full ref object
+  # ({ name, namespace, sectionName, port }).
+  parentRefs:
+    - my-gateway
+  hostnames:
+    - example.com
+
+  # Ergonomic HTTP route shortcut — each entry becomes one rule routing to
+  # this chart's Service. For anything advanced, use `rules` below instead.
+  paths:
+    - path: "/"
+      # pathType: PathPrefix        # PathPrefix | Exact | RegularExpression
+      # destination:                # override target (defaults to this Service)
+      #   name: other-service
+      #   port: 8080
+      #   weight: 1
+
+  # Raw rules passthrough (1:1 with the CRD `rules`). When set this REPLACES
+  # the `paths` shortcut entirely.
+  rules: []
+
+# =============================================================================
+# HEALTH CHECKS & MONITORING
+# =============================================================================
+
+# -- Startup/liveness/readiness probes for the main container. Set enabled=false to omit all probes.
+healthChecks:
+  enabled: true
+  startupProbe:
+    path: "/health/startup"
+    periodSeconds: 5
+    failureThreshold: 30
+    successThreshold: 1
+    initialDelaySeconds: 10
+    timeoutSeconds: 3
+  livenessProbe:
+    path: "/health/liveness"
+    periodSeconds: 10
+    failureThreshold: 10
+    successThreshold: 1
+    initialDelaySeconds: 1
+    timeoutSeconds: 3
+  readinessProbe:
+    path: "/health/readiness"
+    periodSeconds: 10
+    failureThreshold: 3
+    successThreshold: 1
+    initialDelaySeconds: 1
+    timeoutSeconds: 3
+
+# =============================================================================
+# SCALING & RESOURCES
+# =============================================================================
+
+# -- Container resource requests/limits. Rendered as-is UNLESS
+# verticalPodAutoscaler is enabled with an active updatePolicy.updateMode (i.e.
+# anything other than the default "Off") for this container — in which case
+# whichever field VPA actually manages is dropped from here and deferred to
+# it, per the effective containerPolicies[].controlledValues for this
+# container ("RequestsAndLimits", VPA's own default, or "RequestsOnly"):
+#   - RequestsAndLimits (default): `requests` renders from here, `limits` is
+#     deferred to VPA (VPA sets both).
+#   - RequestsOnly: `limits` renders from here (VPA never touches limits in
+#     this mode, so this is the only place they can come from), `requests`
+#     is deferred to VPA.
+# With updateMode "Off" (recommendation-only, the default) VPA never mutates
+# the pod at all, so both requests and limits set here always apply as-is.
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+# -- PodDisruptionBudget (policy/v1). Guarantees a minimum number of pods stay
+# up during voluntary disruptions (node drains, cluster upgrades) — relevant
+# for any multi-replica workload, especially one scaled by the HPA/VPA/KEDA
+# below. Set at most one of minAvailable/maxUnavailable; defaults to
+# maxUnavailable: 1 when enabled with neither set.
+podDisruptionBudget:
+  enabled: false
+  labels: {}
+  annotations: {}
+  minAvailable:
+  maxUnavailable:
+
+# -- HorizontalPodAutoscaler (autoscaling/v2). maxReplicas is required when enabled.
+horizontalPodAutoscaler:
+  enabled: false
+
+  # Extra labels/annotations on the HorizontalPodAutoscaler resource
+  labels: {}
+  annotations: {}
+
+  # Scale target. Defaults to this chart's Deployment when left empty.
+  scaleTargetRef: {}
+    # apiVersion: apps/v1
+    # kind: Deployment
+    # name: my-deployment
+
+  minReplicas: 1
+  maxReplicas: 100   # required when enabled
+
+  # Convenience resource-utilization shortcuts. Set to null to disable either.
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+  # Full metrics passthrough (autoscaling/v2), appended after the shortcuts
+  # above. Use for pods/object/external/custom metrics or AverageValue targets.
+  metrics: []
+    # - type: Pods
+    #   pods:
+    #     metric:
+    #       name: packets-per-second
+    #     target:
+    #       type: AverageValue
+    #       averageValue: 1k
+
+  # Scaling behavior (autoscaling/v2) — stabilization windows and policies.
+  behavior: {}
+    # scaleDown:
+    #   stabilizationWindowSeconds: 300
+    #   policies:
+    #     - type: Percent
+    #       value: 100
+    #       periodSeconds: 15
+    # scaleUp:
+    #   stabilizationWindowSeconds: 0
+    #   policies:
+    #     - type: Percent
+    #       value: 100
+    #       periodSeconds: 15
+    #     - type: Pods
+    #       value: 4
+    #       periodSeconds: 15
+    #   selectPolicy: Max
+
+# -- VerticalPodAutoscaler (autoscaling.k8s.io/v1).
+verticalPodAutoscaler:
+  enabled: false
+
+  # Extra labels/annotations on the VerticalPodAutoscaler resource
+  labels: {}
+  annotations: {}
+
+  # Scale target. Defaults to this chart's Deployment when left empty.
+  targetRef: {}
+    # apiVersion: apps/v1
+    # kind: Deployment
+    # name: my-deployment
+
+  updatePolicy:
+    # updateMode: Off | Initial | Recreate | InPlaceOrRecreate | InPlace
+    #   Recreate           - eviction-based updates.
+    #   InPlaceOrRecreate  - in-place resize, falls back to eviction (VPA >= 1.4).
+    #   InPlace            - in-place only, never evicts
+    #                        (alpha, VPA >= 1.7, K8s >= 1.33 + InPlace feature gate).
+    #   Auto is DEPRECATED since VPA 1.4.0 (behaves like Recreate) — prefer Recreate.
+    updateMode: "Off"
+    # minReplicas: 1
+
+  # Optional alternate recommenders
+  recommenders: []
+    # - name: custom-recommender
+
+  # Full control: one entry per container. When set, this REPLACES
+  # defaultContainerPolicy entirely.
+  containerPolicies: []
+    # - containerName: "*"        # "*" applies to all containers
+    #   mode: Auto                # Auto | Off
+    #   controlledResources: ["cpu", "memory"]
+    #   controlledValues: RequestsAndLimits  # RequestsAndLimits | RequestsOnly
+    #   minAllowed:
+    #     cpu: 50m
+    #     memory: 128Mi
+    #   maxAllowed:
+    #     cpu: "2"
+    #     memory: 2Gi
+
+  # Used only when containerPolicies is empty.
+  defaultContainerPolicy:
+    containerName: "*"
+    controlledResources: ["cpu", "memory"]
+    # controlledValues: RequestsAndLimits
+    minAllowed:
+      cpu: 50m
+      memory: 128Mi
+    maxAllowed: {}
+
+# =============================================================================
+# KEDA AUTOSCALING
+# =============================================================================
+
+# -- KEDA ScaledObject and TriggerAuthentication (event-driven autoscaling).
+keda:
+  enabled: false
+
+  # TriggerAuthentication configuration
+  triggerAuthentication:
+    # Name for the TriggerAuthentication resource (defaults to generated name)
+    name: ""  # Example: "pipeline-trigger-auth"
+
+    # Secret-based authentication
+    secretTargetRef: []
+    # Example:
+    # - parameter: personalAccessToken
+    #   name: azdevops
+    #   key: AZP_TOKEN
+
+    # Pod Identity authentication
+    podIdentity: {}
+    # Example:
+    # provider: azure-workload
+    # identityId: "identity-id"
+
+    # Environment variable authentication
+    env: []
+    # Example:
+    # - parameter: connection
+    #   name: CONNECTION_STRING
+    #   containerName: container-name
+
+  # ScaledObject configuration
+  scaledObject:
+    # Annotations for the ScaledObject
+    annotations: {}
+
+    # Target reference for scaling
+    scaleTargetRef:
+      apiVersion: "apps/v1"
+      kind: "Deployment"
+      name: ""  # Defaults to the fullname of the chart
+      envSourceContainerName: ""
+
+    # Scaling behavior
+    pollingInterval: 30
+    cooldownPeriod: 300
+    idleReplicaCount: 0
+    minReplicaCount: 1
+    maxReplicaCount: 10
+
+    # Fallback configuration
+    fallback: {}
+    # Example:
+    # failureThreshold: 3
+    # replicas: 2
+
+    # Advanced configuration
+    advanced: {}
+    # Example:
+    # restoreToOriginalReplicaCount: false
+    # horizontalPodAutoscalerConfig:
+    #   name: custom-hpa-name
+    #   behavior:
+    #     scaleDown:
+    #       stabilizationWindowSeconds: 300
+    #       policies:
+    #       - type: Percent
+    #         value: 100
+    #         periodSeconds: 15
+    #     scaleUp:
+    #       stabilizationWindowSeconds: 0
+    #       policies:
+    #       - type: Percent
+    #         value: 100
+    #         periodSeconds: 15
+    #       - type: Pods
+    #         value: 4
+    #         periodSeconds: 15
+    #       selectPolicy: Max
+    # scalingPolicy:            # KEDA >= 2.13 (alpha); raw passthrough
+    #   activationThreshold: "0"
+
+    # Triggers configuration
+    triggers: []
+    # Examples:
+    # Azure Pipelines scaler (showing all optional per-trigger fields):
+    # - type: azure-pipelines
+    #   name: azp-trigger              # optional; distinguishes multiple triggers of the same type
+    #   metadata:
+    #     poolID: "14"
+    #     organizationURLFromEnv: "AZP_URL"
+    #   authenticationRef:
+    #     name: pipeline-trigger-auth  # Uses dedicated secret name
+    #     kind: TriggerAuthentication  # optional; or ClusterTriggerAuthentication
+    #   useCachedMetrics: false        # optional; serve metrics from KEDA's cache between polls
+    #
+    # Prometheus scaler:
+    # - type: prometheus
+    #   metadata:
+    #     serverAddress: "http://prometheus.monitoring.svc.cluster.local:9090"
+    #     metricName: "http_requests_per_second"
+    #     threshold: "10"
+    #     query: "sum(rate(http_requests_total[1m]))"
+    #   authenticationRef:
+    #     name: pipeline-trigger-auth  # Uses dedicated secret name
+    #
+    # CPU scaler:
+    # - type: cpu
+    #   metricType: Utilization
+    #   metadata:
+    #     value: "80"
+    #
+    # Memory scaler:
+    # - type: memory
+    #   metricType: Utilization
+    #   metadata:
+    #     value: "80"
+    #
+    # RabbitMQ scaler:
+    # - type: rabbitmq
+    #   metadata:
+    #     protocol: amqp
+    #     queueName: "task-queue"
+    #     mode: QueueLength
+    #     value: "10"
+    #     host: "amqp://guest:guest@rabbitmq.default.svc.cluster.local:5672/"
+    #
+    # Redis scaler:
+    # - type: redis
+    #   metadata:
+    #     address: "redis.default.svc.cluster.local:6379"
+    #     listName: "task-list"
+    #     listLength: "5"
+    #
+    # Kafka scaler:
+    # - type: kafka
+    #   metadata:
+    #     bootstrapServers: "kafka.kafka.svc.cluster.local:9092"
+    #     consumerGroup: "my-group"
+    #     topic: "my-topic"
+    #     lagThreshold: "10"
+
+# =============================================================================
+# SECURITY
+# =============================================================================
+
+# -- TLS certificate mounted into the container from a Secret.
+tls:
+  enabled: false
+  certFile: ""
+  keyFile: ""
+  mountPath: ""
+
+# -- Istio AuthorizationPolicy entries (list; one AuthorizationPolicy resource per enabled entry, named <fullname>-<name>).
+authorizationPolicy: []
+  # - name: allow-frontend          # required; suffix of the resource name
+  #   enabled: true
+  #   labels: {}
+  #   annotations: {}
+  #   # ALLOW | DENY | AUDIT | CUSTOM
+  #   action: ALLOW
+  #   # Required only for action: CUSTOM (external authorizer).
+  #   provider: {}
+  #     # name: my-ext-authz
+  #   # Workload selector. Defaults to this chart's selector labels when both
+  #   # selector and targetRefs are omitted. At most one of the two may be set.
+  #   selector: {}
+  #     # matchLabels:
+  #     #   app.kubernetes.io/name: my-app
+  #   # targetRefs: attach to a Gateway/waypoint/Service instead of a selector.
+  #   targetRefs: []
+  #     # - kind: Gateway
+  #     #   group: gateway.networking.k8s.io
+  #     #   name: my-gateway
+  #   # Native Istio rules — list of { from, to, when }, 1:1 with the CRD.
+  #   rules:
+  #     - from:
+  #         - source:
+  #             principals: ["cluster.local/ns/team-a/sa/frontend"]
+  #             namespaces: ["team-a"]
+  #       to:
+  #         - operation:
+  #             methods: ["GET", "POST"]
+  #             paths: ["/api/*"]
+  #       when:
+  #         - key: request.headers[x-env]
+  #           values: ["prod"]
+
+# -- External Secrets Operator SecretStore (one per release, named <fullname>).
+secretStore: {}
+  # annotations: {}
+  # spec:
+  #   provider:
+  #     gcpsm:
+  #       projectID: "my-project"
+  #       auth:
+  #         secretRef:
+  #           secretAccessKeySecretRef:
+  #             name: gcpsm-secret
+  #             key: secret-access-credentials
+
+# -- External Secrets Operator ExternalSecret entries (map; one ExternalSecret resource per key, named after the map key).
+externalSecrets: {}
+  # my-app-secret:
+  #   annotations: {}
+  #   refreshInterval: 1h
+  #   secretStoreRef:
+  #     name: my-secretstore
+  #     kind: SecretStore
+  #   target:
+  #     name: my-app-secret
+  #     creationPolicy: Owner
+  #   data:
+  #     - secretKey: username
+  #       remoteRef:
+  #         key: my-secret
+  #         property: username
+  #     - secretKey: password
+  #       remoteRef:
+  #         key: my-secret
+  #         property: password
+  #   # Or use dataFrom to fetch all keys from a secret
+  #   # dataFrom:
+  #   #   - extract:
+  #   #       key: my-secret
+
+# =============================================================================
+# STORAGE
+# =============================================================================
+
+# -- Extra pod volumes.
+volumes: []
+# - name: foo
+#   secret:
+#     secretName: mysecret
+#     optional: false
+
+# -- Extra container volume mounts (applied to the main and sidecar containers).
+volumeMounts: []
+# - name: foo
+#   mountPath: "/etc/foo"
+#   readOnly: true
+
+# =============================================================================
+# SCHEDULING
+# =============================================================================
+
+# -- Node selector for pod scheduling.
+nodeSelector: {}
+
+# -- Pod tolerations.
+tolerations: []
+
+# -- Pod affinity/anti-affinity. Defaults to soft anti-affinity across hosts when empty.
+affinity: {}
+
+# =============================================================================
+# JOBS
+# =============================================================================
+
+# -- Pre-install/pre-upgrade hook Jobs (list; one Job per enabled entry). Empty by default.
+jobs: []
+#  - name: migrate           # required; used in the Job name and labels
+#    enabled: true
+#    waitForIt: false         # when true, the Deployment pod gets a wait-for-job init container that blocks until this job completes
+#    args: []
+#    command: []
+#    restartPolicy: OnFailure
+#    backoffLimit: 6
+#    image:
+#      repository: ""
+#      pullPolicy: ""
+#      tag: ""
+#    resources: {}
+#    volumes: []
+#    volumeMounts: []
+#    envVars: []              # plain env vars (list of {name, value})
+#    envFrom: []              # raw envFrom sources (secretRef/configMapRef)
+
+# =============================================================================
+# SIDECARS
+# =============================================================================
+
+# -- Additional containers in the pod (list; one entry per sidecar). Each entry requires a unique `name`, used to derive the container, port, and Secret names. Set a distinct `service.port` per sidecar if more than one needs a Service port.
+sidecars: []
+#  - name: proxy              # required; unique, valid DNS label (used for container/port/secret names)
+#    enabled: true
+#    securityContext: {}
+#    image:
+#      repository: alpine
+#      pullPolicy: IfNotPresent
+#      tag: "1.0.0"
+#    healthChecks:
+#      enabled: true
+#      startupProbe:
+#        path: "/health/startup"
+#        periodSeconds: 5
+#        failureThreshold: 30
+#        successThreshold: 1
+#        initialDelaySeconds: 10
+#        timeoutSeconds: 3
+#      livenessProbe:
+#        path: "/health/liveness"
+#        periodSeconds: 10
+#        failureThreshold: 10
+#        successThreshold: 1
+#        initialDelaySeconds: 1
+#        timeoutSeconds: 3
+#      readinessProbe:
+#        path: "/health/readiness"
+#        periodSeconds: 10
+#        failureThreshold: 3
+#        successThreshold: 1
+#        initialDelaySeconds: 1
+#        timeoutSeconds: 3
+#    service:
+#      port: 8081             # Service port for this sidecar; must be unique across the release
+#      targetPort: 8080
+#      targetScheme: HTTP
+#    resources: {}
+#    appSettings: {}
+
+# =============================================================================
+# APPLICATION CONFIGURATION
+# =============================================================================
+
+# -- Core framework settings: config-file mount path/name.
+helmFrameworkSettings:
+  configPath: "/app"
+  # Full name of the app config file mounted into the container (defaults to "appsettings.Production.json").
+  configFileName: "appsettings.Production.json"
+
+# -- App configuration rendered into a Secret and mounted as the config file.
+appSettings: {}
+# -- Plain environment variables (list of {name, value}). Set proxy vars (HTTPS_PROXY, NO_PROXY, ...) here too.
+envVars: []
+# -- Environment variables sourced from a Secret (map of key: value).
+envVarsFromSecret: {}

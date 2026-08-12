@@ -1,0 +1,182 @@
+{{- define "helm-framework.deployment.job" -}}
+{{- $root := . -}}
+{{- $state := dict "rendered" false -}}
+{{- range $index, $job := .Values.jobs }}
+{{- if $job.enabled }}
+{{- if $state.rendered }}
+---
+{{- end }}
+{{- $_ := set $state "rendered" true }}
+{{- $jobName := $job.name | default (printf "job-%d" $index) }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "helm-framework.fullname" $root }}-{{ $jobName }}
+  annotations:
+    helm.sh/hook: pre-upgrade, pre-install
+    helm.sh/hook-delete-policy: before-hook-creation
+    helm.sh/hook-weight: "-10"
+  labels:
+    job: {{ include "helm-framework.fullname" $root }}-{{ $jobName }}
+    {{- include "helm-framework.labels" $root | nindent 4 }}
+spec:
+  backoffLimit: {{ $job.backoffLimit | default 6 | int }}
+  template:
+    metadata:
+      annotations:
+        checksum/appSettings: {{ $root.Values.appSettings | default dict | toYaml | sha256sum }}
+        checksum/application: {{ $root.Values.helmFrameworkSettings | default dict | toYaml | sha256sum }}
+      {{- with $root.Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "helm-framework.labels" $root | nindent 8 }}
+        {{- with $root.Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if $root.Values.imagePullSecrets }}
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      serviceAccountName: {{ include "helm-framework.serviceAccountName" $root }}
+      {{- with $root.Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: {{ $job.restartPolicy | default "OnFailure" }}
+      {{- if (($root.Values.initContainer).caBundle).enabled }}
+      initContainers:
+        - name: ca-bundle-init
+          image: "{{ required "Image repository is required!" ($root.Values.image).repository }}:{{ ($root.Values.image).tag | default $root.Chart.AppVersion }}"
+          imagePullPolicy: {{ ($root.Values.image).pullPolicy | default "IfNotPresent" }}
+          {{- with $root.Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command:
+            - /bin/sh
+          args:
+            - -c
+            - /mnt/scripts/combine-certs.sh
+          volumeMounts:
+            - name: scripts
+              mountPath: /mnt/scripts
+            - name: cert-combine
+              mountPath: /mnt/ca-certs
+            - name: authorities
+              mountPath: /mnt/authorities
+      {{- end }}
+      containers:
+        - name: {{ $root.Chart.Name }}
+          {{- with $root.Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ required "Image repository is required!" (($job.image).repository | default ($root.Values.image).repository) }}:{{ ($job.image).tag | default ($root.Values.image).tag | default $root.Chart.AppVersion }}"
+          imagePullPolicy: {{ ($job.image).pullPolicy | default "IfNotPresent" }}
+          {{- if $job.args }}
+          args:
+            {{- toYaml $job.args | nindent 12 }}
+          {{- end }}
+          {{- if $job.command }}
+          command:
+            {{- toYaml $job.command | nindent 12 }}
+          {{- end }}
+
+          {{- if or $root.Values.envVars $job.envVars }}
+          env:
+            {{- with $root.Values.envVars }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with $job.envVars }}
+            {{- tpl (toYaml .) $root | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- if or $root.Values.envVarsFromSecret $job.envFrom }}
+          envFrom:
+            {{- if $root.Values.envVarsFromSecret }}
+            - secretRef:
+                name: {{ include "helm-framework.secret-env-name" $root }}
+                optional: false
+            {{- end }}
+            {{- with $job.envFrom }}
+            {{- tpl (toYaml .) $root | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- $res := $job.resources | default $root.Values.resources }}
+          {{- if ($root.Values.verticalPodAutoscaler).enabled }}
+          {{- with ($res).requests }}
+          resources:
+            requests:
+              {{- toYaml . | nindent 14 }}
+          {{- else }}
+          resources: {}
+          {{- end }}
+          {{- else if $res }}
+          resources:
+            {{- toYaml $res | nindent 12 }}
+          {{- else }}
+          resources: {}
+          {{- end }}
+          volumeMounts:
+            {{- if $root.Values.appSettings }}
+            - name: app-settings
+              mountPath: "{{ include "helm-framework.values.application.configPath" $root }}/{{ include "helm-framework.values.configFileName" $root }}"
+              subPath: {{ include "helm-framework.values.configFileName" $root | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if (($root.Values.initContainer).caBundle).enabled }}
+            - name: cert-combine
+              mountPath: {{ include "helm-framework.values.ca-bundle-path" $root }}
+              readOnly: true
+            {{- end }}
+          {{- if $root.Values.volumeMounts }}
+            {{- tpl (toYaml $root.Values.volumeMounts) $root | nindent 12 }}
+          {{- end }}
+          {{- if $job.volumeMounts }}
+            {{- tpl (toYaml $job.volumeMounts) $root | nindent 12 }}
+          {{- end }}
+      volumes:
+        {{- if $root.Values.appSettings }}
+        - name: app-settings
+          secret:
+            secretName: {{ include "helm-framework.secret-app-settings" $root }}
+            optional: false
+        {{- end }}
+        {{- if (($root.Values.initContainer).caBundle).enabled }}
+        - name: cert-combine
+          emptyDir: {}
+        - name: scripts
+          secret:
+            secretName: {{ include "helm-framework.secret-scripts" $root }}
+            optional: false
+            defaultMode: 0555
+        - name: authorities
+          secret:
+            secretName: {{ include "helm-framework.secret-authorities" $root }}
+            optional: false
+        {{- end }}
+      {{- if $root.Values.volumes }}
+        {{- tpl (toYaml $root.Values.volumes) $root | nindent 8 }}
+      {{- end }}
+      {{- if $job.volumes }}
+        {{- tpl (toYaml $job.volumes) $root | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

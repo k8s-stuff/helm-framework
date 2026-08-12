@@ -1,0 +1,21 @@
+# Helm
+*.tgz
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.claude/
+.claude-flow/
+*.lock
+helm/helm-framework-test-template/charts/
+
+# Node / semantic-release
+node_modules/
+.VERSION

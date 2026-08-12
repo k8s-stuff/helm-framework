@@ -1,0 +1,316 @@
+{{- define "helm-framework.deployment.deploy" -}}
+{{- $vpa := .Values.verticalPodAutoscaler | default dict -}}
+{{- /* VPA in updateMode "Off" (the chart default) only recommends — it never mutates the pod, so static resources must render as configured, limits included. Only actively-managing VPA (updateMode != "Off") justifies deferring to it. */ -}}
+{{- $vpaManaging := and $vpa.enabled (ne (($vpa.updatePolicy).updateMode | default "Off") "Off") -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "helm-framework.fullname" . }}
+  labels:
+    {{- include "helm-framework.labels" . | nindent 4 }}
+spec:
+  {{- if and (not (.Values.horizontalPodAutoscaler).enabled) (not (.Values.keda).enabled) }}
+  replicas: {{ .Values.replicaCount | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "helm-framework.selectorLabels" . | nindent 6 }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- . | toYaml | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      annotations:
+        {{- if .Values.forceReload }}
+        force-reload: {{ randAlphaNum 5 | quote }}
+        {{- end }}
+        checksum/appSettings: {{ .Values.appSettings | default dict | toYaml | sha256sum }}
+        {{- range $sc := .Values.sidecars }}
+        {{- if and $sc.enabled $sc.appSettings }}
+        checksum/sidecar-{{ $sc.name }}-appSettings: {{ $sc.appSettings | default dict | toYaml | sha256sum }}
+        {{- end }}
+        {{- end }}
+        checksum/application: {{ .Values.helmFrameworkSettings | default dict | toYaml | sha256sum }}
+        checksum/service: {{ .Values.service | default dict | toYaml | sha256sum }}
+        checksum/tls: {{ .Values.tls | default dict | toYaml | sha256sum }}
+        checksum/extra-secret-env: {{ .Values.envVarsFromSecret | default dict | toYaml | sha256sum }}
+        checksum/extra-env: {{ .Values.envVars | default list | toYaml | sha256sum }}
+        checksum/sidecars: {{ .Values.sidecars | default list | toYaml | sha256sum }}
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "helm-framework.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "helm-framework.serviceAccountName" . }}
+      {{- /* Consumer's explicit automount setting always wins. Unset defaults to
+      false, except when the wait-for-job init container is active — it needs
+      the ServiceAccount token to call the Kubernetes API, and the RBAC
+      Role/RoleBinding granting it access are auto-provisioned for exactly
+      this case, so a token that never gets mounted would make that grant
+      pointless. */}}
+      automountServiceAccountToken: {{ if hasKey (.Values.serviceAccount | default dict) "automount" }}{{ .Values.serviceAccount.automount }}{{ else }}{{ eq (include "helm-framework.waitFor.active" .) "true" }}{{ end }}
+      securityContext:
+        {{- include "helm-framework.podSecurityContext" .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- /* Collect names of enabled jobs flagged with waitForIt: true */ -}}
+      {{- $waitForJobs := list -}}
+      {{- range $index, $job := .Values.jobs -}}
+        {{- if and $job.enabled $job.waitForIt -}}
+          {{- $jobName := $job.name | default (printf "job-%d" $index) -}}
+          {{- $waitForJobs = append $waitForJobs (printf "job/%s-%s" (include "helm-framework.fullname" $) $jobName) -}}
+        {{- end -}}
+      {{- end -}}
+      {{- $waitForEnabled := gt (len $waitForJobs) 0 -}}
+      {{- if or $waitForEnabled ((.Values.initContainer).caBundle).enabled .Values.initContainers }}
+      initContainers:
+        {{- if ((.Values.initContainer).caBundle).enabled }}
+        - name: ca-bundle-init
+          image: "{{ required "Image repository is required!" (.Values.image).repository }}:{{ (.Values.image).tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ (.Values.image).pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            {{- include "helm-framework.securityContext" .Values.securityContext | nindent 12 }}
+          command:
+            - /bin/sh
+          args:
+            - -c
+            - /mnt/scripts/combine-certs.sh
+          volumeMounts:
+            - name: scripts
+              mountPath: /mnt/scripts
+            - name: cert-combine
+              mountPath: /mnt/ca-certs
+            - name: authorities
+              mountPath: /mnt/authorities
+        {{- end }}
+        {{- if $waitForEnabled }}
+        - name: wait-for-job
+          image: {{ include "helm-framework.values.initContainer.waitFor.image." . }}
+          imagePullPolicy: {{ (((.Values.initContainer).waitFor).image).pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            {{- include "helm-framework.securityContext" .Values.securityContext | nindent 12 }}
+          {{- $waitForCommand := (((.Values.initContainer).waitFor).command) }}
+          {{- $waitForArgs := (((.Values.initContainer).waitFor).args) }}
+          {{- if $waitForCommand }}
+          command:
+            {{- toYaml $waitForCommand | nindent 12 }}
+          {{- end }}
+          {{- if $waitForArgs }}
+          args:
+            {{- tpl (toYaml $waitForArgs) . | nindent 12 }}
+          {{- else if not $waitForCommand }}
+          command:
+            - kubectl
+          args:
+            - wait
+            - --for=condition=complete
+            - --timeout={{ ((.Values.initContainer).waitFor).timeout | default "600s" }}
+            {{- range $waitForJobs }}
+            - {{ . }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+        {{- with .Values.initContainers }}
+        {{- tpl (toYaml .) $ | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- include "helm-framework.securityContext" .Values.securityContext | nindent 12 }}
+          image: "{{ required "Image repository is required!" (.Values.image).repository }}:{{ (.Values.image).tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ (.Values.image).pullPolicy | default "IfNotPresent" }}
+          {{- if .Values.command }}
+          command:
+            {{- toYaml .Values.command | nindent 12 }}
+          {{- end }}
+          {{- if .Values.args }}
+          args:
+            {{- toYaml .Values.args | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ (include "helm-framework.values.service.targetPort" .) }}
+              protocol: TCP
+          {{- include "helm-framework.probes" (dict "healthChecks" .Values.healthChecks "portName" "http" "scheme" (include "helm-framework.values.service.targetScheme" .)) | nindent 10 }}
+          {{- with .Values.envVars }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.envVarsFromSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ include "helm-framework.secret-env-name" . }}
+                optional: false
+          {{- end }}
+          {{- if $vpaManaging }}
+          {{- $cv := include "helm-framework.vpa.controlledValues" (dict "root" $ "containerName" .Chart.Name) }}
+          {{- $r := dict }}
+          {{- if eq $cv "RequestsOnly" }}
+            {{- with (.Values.resources).limits }}{{- $r = set $r "limits" . }}{{- end }}
+          {{- else }}
+            {{- with (.Values.resources).requests }}{{- $r = set $r "requests" . }}{{- end }}
+          {{- end }}
+          {{- if $r }}
+          resources:
+            {{- toYaml $r | nindent 12 }}
+          {{- else }}
+          resources: {}
+          {{- end }}
+          {{- else if .Values.resources }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- else }}
+          resources: {}
+          {{- end }}
+          volumeMounts:
+            {{- if .Values.appSettings }}
+            - name: app-settings
+              mountPath: "{{ include "helm-framework.values.application.configPath" . }}/{{ include "helm-framework.values.configFileName" . }}"
+              subPath: {{ include "helm-framework.values.configFileName" . | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if ((.Values.initContainer).caBundle).enabled }}
+            - name: cert-combine
+              mountPath: {{ include "helm-framework.values.ca-bundle-path" . }}
+              readOnly: true
+            {{- end }}
+            {{- if (.Values.tls).enabled }}
+            - name: tls
+              readOnly: true
+              mountPath: {{ include "helm-framework.values.tls.mountPath" . }}
+            {{- end }}
+          {{- if .Values.volumeMounts }}
+            {{- tpl (toYaml .Values.volumeMounts) . | nindent 12 }}
+          {{- end }}
+        {{- range $sc := .Values.sidecars }}
+        {{- if $sc.enabled }}
+        {{- $scContainerName := printf "%s-%s" $.Chart.Name (required "Each sidecar requires a name!" $sc.name) | trunc 63 | trimSuffix "-" }}
+        - name: {{ $scContainerName }}
+          securityContext:
+            {{- include "helm-framework.securityContext" ($sc.securityContext | default $.Values.securityContext) | nindent 12 }}
+          image: "{{ required "Sidecar image repository is required!" ($sc.image).repository }}:{{ ($sc.image).tag | default $.Chart.AppVersion }}"
+          imagePullPolicy: {{ ($sc.image).pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: {{ include "helm-framework.sidecar.portName" $sc }}
+              containerPort: {{ include "helm-framework.values.service.targetPort" $sc }}
+              protocol: TCP
+          {{- /* Sidecar probes default OFF (unlike the main container): a sidecar rarely serves the app's /health/* paths, so default-on probes would fail startup and block readiness. */}}
+          {{- if ($sc.healthChecks).enabled }}
+          {{- include "helm-framework.probes" (dict "healthChecks" $sc.healthChecks "portName" (include "helm-framework.sidecar.portName" $sc) "scheme" (include "helm-framework.values.service.targetScheme" $sc)) | nindent 10 }}
+          {{- end }}
+          {{- with $.Values.envVars }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if $.Values.envVarsFromSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ include "helm-framework.secret-env-name" $ }}
+                optional: false
+          {{- end }}
+          {{- if $vpaManaging }}
+          {{- $cv := include "helm-framework.vpa.controlledValues" (dict "root" $ "containerName" $scContainerName) }}
+          {{- $r := dict }}
+          {{- if eq $cv "RequestsOnly" }}
+            {{- with ($sc.resources).limits }}{{- $r = set $r "limits" . }}{{- end }}
+          {{- else }}
+            {{- with ($sc.resources).requests }}{{- $r = set $r "requests" . }}{{- end }}
+          {{- end }}
+          {{- if $r }}
+          resources:
+            {{- toYaml $r | nindent 12 }}
+          {{- else }}
+          resources: {}
+          {{- end }}
+          {{- else if $sc.resources }}
+          resources:
+            {{- toYaml $sc.resources | nindent 12 }}
+          {{- else }}
+          resources: {}
+          {{- end }}
+          volumeMounts:
+            {{- if $sc.appSettings }}
+            - name: app-settings-{{ $sc.name }}
+              mountPath: "{{ include "helm-framework.values.application.configPath" $ }}/{{ include "helm-framework.values.configFileName" $ }}"
+              subPath: {{ include "helm-framework.values.configFileName" $ | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if (($.Values.initContainer).caBundle).enabled }}
+            - name: cert-combine
+              mountPath: {{ include "helm-framework.values.ca-bundle-path" $ }}
+              readOnly: true
+            {{- end }}
+            {{- if ($.Values.tls).enabled }}
+            - name: tls
+              readOnly: true
+              mountPath: {{ include "helm-framework.values.tls.mountPath" $ }}
+            {{- end }}
+          {{- if $.Values.volumeMounts }}
+            {{- tpl (toYaml $.Values.volumeMounts) $ | nindent 12 }}
+          {{- end }}
+        {{- end }}
+        {{- end }}
+      volumes:
+        {{- if .Values.appSettings }}
+        - name: app-settings
+          secret:
+            secretName: {{ include "helm-framework.secret-app-settings" . }}
+            optional: false
+        {{- end }}
+        {{- range $sc := .Values.sidecars }}
+        {{- if and $sc.enabled $sc.appSettings }}
+        - name: app-settings-{{ $sc.name }}
+          secret:
+            secretName: {{ include "helm-framework.secret-sidecar-app-settings" (dict "root" $ "name" $sc.name) }}
+            optional: false
+        {{- end }}
+        {{- end }}
+        {{- if (.Values.tls).enabled }}
+        - name: tls
+          secret:
+            secretName: {{ include "helm-framework.secret-tls" . }}
+            optional: false
+        {{- end }}
+        {{- if ((.Values.initContainer).caBundle).enabled }}
+        - name: cert-combine
+          emptyDir: {}
+        - name: scripts
+          secret:
+            secretName: {{ include "helm-framework.secret-scripts" . }}
+            optional: false
+            defaultMode: 0555
+        - name: authorities
+          secret:
+            secretName: {{ include "helm-framework.secret-authorities" . }}
+            optional: false
+        {{- end }}
+      {{- if .Values.volumes }}
+        {{- tpl (toYaml .Values.volumes) . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+        {{- if .Values.affinity }}
+        {{- tpl (toYaml .Values.affinity) . | nindent 8 }}
+        {{- else }}
+          {{- toYaml (fromYaml (include "helm-framework.values.affinity" .)) | nindent 8 }}
+        {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- end }}

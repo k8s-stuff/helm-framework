@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+  pages: write
+  pull-requests: write
+
+env:
+  CHART_NAME: helm-framework
+  CHART_PATH: helm/helm-framework
+
+jobs:
+  release-oci:
+    name: Push to GHCR (OCI)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Package chart
+        run: helm package "$CHART_PATH" --version "${{ steps.version.outputs.version }}"
+
+      - name: Push chart to GHCR
+        run: helm push "$CHART_NAME-${{ steps.version.outputs.version }}.tgz" "oci://ghcr.io/${{ github.repository_owner }}"
+
+  release-pages:
+    name: Update GitHub Pages chart index
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # chart-releaser-action's own `cr upload` step is deliberately not used
+      # here: it always creates its own release/tag (default
+      # "helm-framework-X.Y.Z"), duplicating the "vX.Y.Z" release+tag
+      # semantic-release already created. `cr index` has no such side effect
+      # — it only reads whatever release matches --release-name-template, so
+      # attach the package to the existing "vX.Y.Z" release ourselves first.
+      - name: Package chart
+        run: |
+          mkdir -p .cr-release-packages
+          helm package "$CHART_PATH" --version "${{ steps.version.outputs.version }}" --destination .cr-release-packages
+
+      - name: Attach chart package to the existing GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" .cr-release-packages/*.tgz --clobber
+
+      - name: Install cr
+        uses: helm/chart-releaser-action@v1.6.0
+        with:
+          install_only: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Update gh-pages index
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: |
+          owner=$(cut -d '/' -f 1 <<< "$GITHUB_REPOSITORY")
+          repo=$(cut -d '/' -f 2 <<< "$GITHUB_REPOSITORY")
+          mkdir -p .cr-index
+          cr index \
+            --owner "$owner" \
+            --git-repo "$repo" \
+            --package-path .cr-release-packages \
+            --release-name-template "v{{ .Version }}" \
+            --push
+
+  bump-readme-version:
+    name: Open PR to bump README version references and regenerate Claude skill
+    needs: [release-oci]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump README version references
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          # Only rewrites literal pins (--version X.Y.Z, version: "X.Y.Z"),
+          # never the version: ">=X.Y.Z" compatibility range.
+          sed -i -E "s/(--version )[0-9]+\.[0-9]+\.[0-9]+/\1${version}/" README.md
+          sed -i -E "s/(version: \")[0-9]+\.[0-9]+\.[0-9]+(\")/\1${version}\2/g" README.md
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+
+      - name: Regenerate Claude skill
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/generate-skill.mjs --version "$VERSION"
+
+      - name: Check for changes
+        id: bump
+        run: |
+          if git diff --quiet -- README.md plugins/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open PR with the version bump
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          branch="docs/readme-version-${version}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add README.md plugins/
+          git commit -m "docs: bump README version references and regenerate Claude skill to ${version}"
+          git push -u origin "$branch"
+          gh pr create --title "docs: bump README version references and regenerate Claude skill to ${version}" \
+            --body "Automated version bump opened by the Release workflow after \`v${version}\` was published." \
+            --base main --head "$branch"
+          gh pr merge --auto --squash --delete-branch "$branch"
