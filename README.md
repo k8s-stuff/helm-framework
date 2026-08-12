@@ -1,6 +1,6 @@
 # helm-framework
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/helm-framework)](https://artifacthub.io/packages/search?repo=helm-framework)
 [![Release](https://github.com/k8s-stuff/helm-framework/actions/workflows/release.yaml/badge.svg)](https://github.com/k8s-stuff/helm-framework/actions/workflows/release.yaml)
 [![Lint](https://github.com/k8s-stuff/helm-framework/actions/workflows/lint.yaml/badge.svg)](https://github.com/k8s-stuff/helm-framework/actions/workflows/lint.yaml)
@@ -108,5 +108,5 @@ guidelines on how to develop, test, and submit changes.
 
 ## License
 
-This project is licensed under the Apache License 2.0 — see the [LICENSE](LICENSE)
+This project is licensed under the MIT License — see the [LICENSE](LICENSE)
 file for details.
