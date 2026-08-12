@@ -3,6 +3,16 @@ entries:
   helm-framework:
   - apiVersion: v2
     appVersion: 1.0.0
+    created: "2026-08-12T19:49:04.22369435Z"
+    description: Base Helm framework library
+    digest: 7f1ec190c34ba0e32928762f51be0c308bfd97a1a07647c9aa00f3e5fdce429f
+    name: helm-framework
+    type: library
+    urls:
+    - https://github.com/k8s-stuff/helm-framework/releases/download/v1.1.0/helm-framework-1.1.0.tgz
+    version: 1.1.0
+  - apiVersion: v2
+    appVersion: 1.0.0
     created: "2026-08-12T08:57:11.15978685Z"
     description: Base Helm framework library
     digest: 19b981a15b7652ac56249ab4eda1eaae2d1f4b7d85b0073fdc1b164437a8bac1
@@ -11,4 +21,4 @@ entries:
     urls:
     - https://github.com/k8s-stuff/helm-framework/releases/download/v1.0.0/helm-framework-1.0.0.tgz
     version: 1.0.0
-generated: "2026-08-12T08:57:11.159791729Z"
+generated: "2026-08-12T19:49:04.223708071Z"
