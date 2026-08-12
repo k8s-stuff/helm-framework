@@ -10,6 +10,7 @@
     (include "helm-framework.deployment.secret-scripts" .)
     (include "helm-framework.deployment.secret-authorities" .)
     (include "helm-framework.deployment.secret-env" .)
+    (include "helm-framework.deployment.secret-sidecar-env" .)
     (include "helm-framework.deployment.secret-app-settings" .)
     (include "helm-framework.deployment.secret-sidecar-app-settings" .)
     (include "helm-framework.deployment.secretstore" .)

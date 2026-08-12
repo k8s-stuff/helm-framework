@@ -99,6 +99,44 @@ Secret name for a sidecar's appSettings. Expects a dict: { root, name }.
 {{- end }}
 
 {{/*
+Secret name for a sidecar's envVarsFromSecret. Expects a dict: { root, name }.
+*/}}
+{{- define "helm-framework.secret-sidecar-env-name" -}}
+{{- printf "%s-%s-secret-env" (include "helm-framework.fullname" .root) .name | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{/*
+Plain `env` list for a sidecar container: the release-wide envVars, minus every name
+the sidecar redefines, followed by the sidecar's own envVars. Names the sidecar
+sources from its own Secret are dropped from the list too — a container's `env`
+always beats `envFrom`, so a release-wide entry left in place would shadow the
+sidecar's Secret value. Expects a dict: { root, sidecar }.
+Renders nothing when the sidecar ends up with no plain env vars at all.
+*/}}
+{{- define "helm-framework.sidecar.env" -}}
+{{- $sc := .sidecar -}}
+{{- $overridden := dict -}}
+{{- range $sc.envVars -}}
+{{- $_ := set $overridden .name true -}}
+{{- end -}}
+{{- range $key, $value := ($sc.envVarsFromSecret | default dict) -}}
+{{- $_ := set $overridden $key true -}}
+{{- end -}}
+{{- $env := list -}}
+{{- range .root.Values.envVars -}}
+{{- if not (hasKey $overridden .name) -}}
+{{- $env = append $env . -}}
+{{- end -}}
+{{- end -}}
+{{- range $sc.envVars -}}
+{{- $env = append $env . -}}
+{{- end -}}
+{{- if $env -}}
+{{- toYaml $env -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Container/Service port name for a sidecar. Expects the sidecar entry (uses .name).
 Port names are limited to 15 chars, so the sidecar name must stay short and unique.
 */}}

@@ -17,6 +17,8 @@ Helm Framework Test Template chart
 | affinity | object | `{}` |  |
 | appSettings.test1.test2 | bool | `true` |  |
 | appSettings.testSetting | string | `"testValue"` |  |
+| args[0] | string | `"-c"` |  |
+| args[1] | string | `"echo hello && sleep 3600"` |  |
 | authorizationPolicy[0].action | string | `"ALLOW"` |  |
 | authorizationPolicy[0].enabled | bool | `true` |  |
 | authorizationPolicy[0].name | string | `"allow-frontend"` |  |
@@ -30,6 +32,7 @@ Helm Framework Test Template chart
 | authorizationPolicy[1].enabled | bool | `true` |  |
 | authorizationPolicy[1].name | string | `"deny-legacy"` |  |
 | authorizationPolicy[1].rules[0].to[0].operation.paths[0] | string | `"/legacy/*"` |  |
+| command[0] | string | `"/bin/sh"` |  |
 | envVarsFromSecret.secretKey | string | `"secretValue"` |  |
 | envVars[0].name | string | `"foo"` |  |
 | envVars[0].value | string | `"bar"` |  |
@@ -86,6 +89,14 @@ Helm Framework Test Template chart
 | horizontalPodAutoscaler.targetCPUUtilizationPercentage | int | `75` |  |
 | horizontalPodAutoscaler.targetMemoryUtilizationPercentage | int | `80` |  |
 | hostAliases | list | `[]` |  |
+| httpRoute.enabled | bool | `true` |  |
+| httpRoute.hostnames[0] | string | `"app.local"` |  |
+| httpRoute.parentRefs[0] | string | `"my-gateway"` |  |
+| httpRoute.paths[0].path | string | `"/"` |  |
+| httpRoute.paths[1].destination.port | int | `8080` |  |
+| httpRoute.paths[1].destination.weight | int | `1` |  |
+| httpRoute.paths[1].path | string | `"/api"` |  |
+| httpRoute.paths[1].pathType | string | `"PathPrefix"` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"alpine"` |  |
 | image.tag | string | `"1.0.0"` |  |
@@ -180,6 +191,12 @@ Helm Framework Test Template chart
 | serviceAccount.name | string | `""` |  |
 | sidecars[0].appSettings.proxySetting | string | `"proxyValue"` |  |
 | sidecars[0].enabled | bool | `true` |  |
+| sidecars[0].envVarsFromSecret.proxySecret | string | `"proxySecretValue"` |  |
+| sidecars[0].envVarsFromSecret.secretKey | string | `"sidecarSecretValue"` |  |
+| sidecars[0].envVars[0].name | string | `"foo"` |  |
+| sidecars[0].envVars[0].value | string | `"sidecar-bar"` |  |
+| sidecars[0].envVars[1].name | string | `"PROXY_MODE"` |  |
+| sidecars[0].envVars[1].value | string | `"transparent"` |  |
 | sidecars[0].image.pullPolicy | string | `"IfNotPresent"` |  |
 | sidecars[0].image.repository | string | `"alpine"` |  |
 | sidecars[0].image.tag | string | `"1.0.0"` |  |

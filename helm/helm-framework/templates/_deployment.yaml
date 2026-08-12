@@ -210,15 +210,26 @@ spec:
           {{- if ($sc.healthChecks).enabled }}
           {{- include "helm-framework.probes" (dict "healthChecks" $sc.healthChecks "portName" (include "helm-framework.sidecar.portName" $sc) "scheme" (include "helm-framework.values.service.targetScheme" $sc)) | nindent 10 }}
           {{- end }}
-          {{- with $.Values.envVars }}
+          {{- /* Sidecars inherit the release-wide envVars/envVarsFromSecret; anything the
+          sidecar sets under its own envVars/envVarsFromSecret wins on a name collision.
+          The sidecar's secretRef is listed last on purpose — with duplicate keys across
+          envFrom sources, the last source wins. */}}
+          {{- with include "helm-framework.sidecar.env" (dict "root" $ "sidecar" $sc) }}
           env:
-            {{- toYaml . | nindent 12 }}
+            {{- . | nindent 12 }}
           {{- end }}
-          {{- if $.Values.envVarsFromSecret }}
+          {{- if or $.Values.envVarsFromSecret $sc.envVarsFromSecret }}
           envFrom:
+            {{- if $.Values.envVarsFromSecret }}
             - secretRef:
                 name: {{ include "helm-framework.secret-env-name" $ }}
                 optional: false
+            {{- end }}
+            {{- if $sc.envVarsFromSecret }}
+            - secretRef:
+                name: {{ include "helm-framework.secret-sidecar-env-name" (dict "root" $ "name" $sc.name) }}
+                optional: false
+            {{- end }}
           {{- end }}
           {{- if $vpaManaging }}
           {{- $cv := include "helm-framework.vpa.controlledValues" (dict "root" $ "containerName" $scContainerName) }}

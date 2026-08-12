@@ -767,6 +767,10 @@ sidecars: []
 #      targetScheme: HTTP
 #    resources: {}
 #    appSettings: {}
+#    # Sidecars inherit the release-wide `envVars` / `envVarsFromSecret`. The two keys
+#    # below add to that set, and win over the release-wide value on a name collision.
+#    envVars: []             # plain env vars (list of {name, value}); same shape as top-level envVars
+#    envVarsFromSecret: {}   # map of key: value, rendered into a per-sidecar Secret
 
 # =============================================================================
 # APPLICATION CONFIGURATION
@@ -780,7 +784,7 @@ helmFrameworkSettings:
 
 # -- App configuration rendered into a Secret and mounted as the config file.
 appSettings: {}
-# -- Plain environment variables (list of {name, value}). Set proxy vars (HTTPS_PROXY, NO_PROXY, ...) here too.
+# -- Plain environment variables (list of {name, value}), applied to the main and sidecar containers. A sidecar's own `envVars`/`envVarsFromSecret` override these per name. Set proxy vars (HTTPS_PROXY, NO_PROXY, ...) here too.
 envVars: []
-# -- Environment variables sourced from a Secret (map of key: value).
+# -- Environment variables sourced from a Secret (map of key: value), applied to the main and sidecar containers. A sidecar's own `envVars`/`envVarsFromSecret` override these per key.
 envVarsFromSecret: {}
