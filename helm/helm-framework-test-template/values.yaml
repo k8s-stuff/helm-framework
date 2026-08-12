@@ -428,6 +428,16 @@ sidecars:
       targetScheme: HTTP
     appSettings:
       proxySetting: "proxyValue"
+    # Sidecar-owned env: `foo` overrides the release-wide envVars entry, `PROXY_MODE`
+    # is sidecar-only, and `secretKey` overrides the release-wide envVarsFromSecret key.
+    envVars:
+      - name: foo
+        value: sidecar-bar
+      - name: PROXY_MODE
+        value: transparent
+    envVarsFromSecret:
+      secretKey: sidecarSecretValue
+      proxySecret: proxySecretValue
 
 # =============================================================================
 # APPLICATION CONFIGURATION

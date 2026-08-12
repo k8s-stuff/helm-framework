@@ -13,8 +13,8 @@ Base Helm framework library
 | args | list | `[]` | Override the main container's default command arguments. Empty uses the image's own CMD (or nothing, if `command` above is also set). |
 | authorizationPolicy | list | `[]` | Istio AuthorizationPolicy entries (list; one AuthorizationPolicy resource per enabled entry, named <fullname>-<name>). |
 | command | list | `[]` | Override the main container's entrypoint. Empty uses the image's own ENTRYPOINT. Useful when several releases of this chart share one image but each needs to run a different process (e.g. an API server vs. a background worker) — set `command`/`args` per release instead of building distinct images. |
-| envVars | list | `[]` | Plain environment variables (list of {name, value}). Set proxy vars (HTTPS_PROXY, NO_PROXY, ...) here too. |
-| envVarsFromSecret | object | `{}` | Environment variables sourced from a Secret (map of key: value). |
+| envVars | list | `[]` | Plain environment variables (list of {name, value}), applied to the main and sidecar containers. A sidecar's own `envVars`/`envVarsFromSecret` override these per name. Set proxy vars (HTTPS_PROXY, NO_PROXY, ...) here too. |
+| envVarsFromSecret | object | `{}` | Environment variables sourced from a Secret (map of key: value), applied to the main and sidecar containers. A sidecar's own `envVars`/`envVarsFromSecret` override these per key. |
 | externalSecrets | object | `{}` | External Secrets Operator ExternalSecret entries (map; one ExternalSecret resource per key, named after the map key). |
 | forceReload | bool | `false` | When true, adds a randomized pod annotation on each render so the Deployment restarts its pods, even when nothing else changed. |
 | fullnameOverride | string | `""` | Override the full release name used for resource names. |
