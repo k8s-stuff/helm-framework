@@ -1,0 +1,5 @@
+{
+  "name": "helm-framework",
+  "description": "Scaffold and configure Helm charts that depend on the helm-framework library chart.",
+  "version": "1.0.0"
+}
