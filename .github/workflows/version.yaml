@@ -1,0 +1,54 @@
+name: Version
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run semantic-release
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_AUTHOR_NAME: "github-actions[bot]"
+          GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+          GIT_COMMITTER_NAME: "github-actions[bot]"
+          GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # GitHub doesn't chain workflow runs off events triggered by the
+      # default GITHUB_TOKEN (anti-recursion safeguard), so the tag pushed
+      # above by semantic-release never fires release.yaml's `on: push:
+      # tags` trigger on its own. Dispatch it explicitly against the new tag.
+      - name: Trigger Release workflow for the new tag
+        if: always()
+        run: |
+          if [ -f .VERSION ]; then
+            version=$(cat .VERSION)
+            echo "Dispatching Release workflow for v${version}"
+            gh workflow run release.yaml --ref "v${version}"
+          else
+            echo "No release published; skipping Release workflow dispatch"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

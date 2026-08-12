@@ -1,0 +1,115 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Node Script Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  lint:
+    name: Helm Lint & Chart Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      - name: Set up Python (for ct)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2
+
+      - name: Helm dependency update (test template chart)
+        run: helm dependency update helm/helm-framework-test-template
+
+      - name: Helm lint (test template chart)
+        run: helm lint helm/helm-framework-test-template
+
+      - name: Run chart-testing (list-changed)
+        id: list-changed
+        run: |
+          changed=$(ct list-changed --target-branch ${{ github.event.repository.default_branch }})
+          if [[ -n "$changed" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run chart-testing (lint)
+        if: steps.list-changed.outputs.changed == 'true'
+        run: ct lint --target-branch ${{ github.event.repository.default_branch }} --chart-dirs helm
+
+      - name: Install kubeconform
+        run: curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+
+      # helm lint/template only catch Go-template and chart-metadata errors, not
+      # invalid apiVersions or malformed fields - validate the rendered output
+      # against the real Kubernetes API schema. This chart also renders CRDs
+      # (Istio VirtualService/AuthorizationPolicy, KEDA ScaledObject/
+      # TriggerAuthentication, VerticalPodAutoscaler), so a second
+      # schema-location falls back to the community CRDs-catalog for those.
+      - name: Validate rendering against Kubernetes schema (kubeconform)
+        working-directory: helm/helm-framework-test-template
+        run: |
+          set -eu
+          KUBECONFORM="$GITHUB_WORKSPACE/kubeconform -strict -summary -schema-location default -schema-location https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"
+
+          rendered_hpa=$(helm template helm-framework-test-template .)
+          echo "$rendered_hpa"
+          echo "$rendered_hpa" | $KUBECONFORM
+
+          # KEDA and the HPA are mutually exclusive (chart fails fast if both
+          # are enabled) - render a second time with KEDA on to independently
+          # exercise the ScaledObject/TriggerAuthentication templates.
+          rendered_keda=$(helm template helm-framework-test-template . --set keda.enabled=true --set horizontalPodAutoscaler.enabled=false)
+          echo "$rendered_keda"
+          echo "$rendered_keda" | $KUBECONFORM
+
+      # helm-framework.probes used Helm's `default` filter on initialDelaySeconds,
+      # but `default` treats numeric 0 as empty - a consumer explicitly setting
+      # initialDelaySeconds: 0 silently got the library's hardcoded default
+      # instead. Assert an explicit 0 survives rendering for all three probes.
+      - name: "Regression test - explicit initialDelaySeconds: 0 must survive rendering"
+        working-directory: helm/helm-framework-test-template
+        run: |
+          set -eu
+
+          rendered_zero_delay=$(helm template helm-framework-test-template . \
+            --set healthChecks.startupProbe.initialDelaySeconds=0 \
+            --set healthChecks.livenessProbe.initialDelaySeconds=0 \
+            --set healthChecks.readinessProbe.initialDelaySeconds=0)
+          echo "$rendered_zero_delay"
+
+          # `|| true` is required: grep -c exits 1 when the count is 0, which
+          # under `set -e` would abort here and skip the diagnostic below.
+          zero_count=$(echo "$rendered_zero_delay" | grep -c 'initialDelaySeconds: 0' || true)
+          if [[ "$zero_count" -ne 3 ]]; then
+            echo "::error::Expected 3 occurrences of 'initialDelaySeconds: 0' but found $zero_count. This means helm-framework.probes is using Helm's 'default' filter again, which treats an explicit 0 as empty and silently falls back to the hardcoded default (10/1/1) instead of honoring it - see _helpers.tpl's use of 'dig' for startup/liveness/readinessProbe.initialDelaySeconds."
+            exit 1
+          fi

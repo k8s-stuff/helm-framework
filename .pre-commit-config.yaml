@@ -1,0 +1,44 @@
+# Pre-commit hooks for the Helm framework repo.
+# Install: pre-commit install && pre-commit install-hooks
+# Run on all files: pre-commit run --all-files
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: fix-byte-order-marker        # strips stray BOMs (e.g. in _deployment-global.tpl)
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+        # Helm templates and _*.tpl contain Go templating, not valid YAML.
+        # Packaged chart deps under helm/ are generated. Skip all of these.
+        exclude: |
+          (?x)^(
+            helm/.+/templates/.*|
+            helm/.+/charts/.*
+          )$
+
+  - repo: https://github.com/norwoodj/helm-docs
+    rev: v1.14.2
+    hooks:
+      - id: helm-docs
+        args: [--chart-search-root=helm]
+
+  - repo: local
+    hooks:
+      - id: helm-lint
+        name: helm lint + template (test-template)
+        language: system
+        pass_filenames: false
+        files: ^helm/
+        entry: bash -c '
+          cd helm/helm-framework-test-template &&
+          helm dependency update >/dev/null &&
+          helm lint . &&
+          helm template test . >/dev/null'

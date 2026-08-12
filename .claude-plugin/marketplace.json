@@ -1,0 +1,13 @@
+{
+  "name": "helm-framework",
+  "owner": {
+    "name": "k8s-stuff"
+  },
+  "plugins": [
+    {
+      "name": "helm-framework",
+      "source": "./plugins/helm-framework",
+      "description": "Scaffold and configure Helm charts that depend on the helm-framework library chart."
+    }
+  ]
+}
