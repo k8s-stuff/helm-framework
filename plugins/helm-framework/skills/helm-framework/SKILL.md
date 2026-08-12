@@ -21,7 +21,7 @@ point and configure everything through their own `values.yaml`.
 ```yaml
 dependencies:
   - name: helm-framework
-    version: "1.0.0"
+    version: "1.1.0"
     repository: "oci://ghcr.io/k8s-stuff"
 ```
 
@@ -30,7 +30,7 @@ dependencies:
 ```yaml
 dependencies:
   - name: helm-framework
-    version: "1.0.0"
+    version: "1.1.0"
     repository: "https://k8s-stuff.github.io/helm-framework"
 ```
 
