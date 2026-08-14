@@ -1,7 +1,7 @@
 # helm-framework migration playbook
 
 Full detail for each of the five phases summarized in `SKILL.md`. Generated
-for version `1.1.0` — the version baked into Phase 0's comparison below.
+for version `1.2.0` — the version baked into Phase 0's comparison below.
 
 ## Phase 0 — Preflight (version currency)
 
@@ -9,7 +9,7 @@ Before touching anything, compare three versions:
 
 1. The consumer's own dependency pin in `Chart.yaml`
    (`dependencies[].version` for `helm-framework`).
-2. The version this skill was generated against: `1.1.0`.
+2. The version this skill was generated against: `1.2.0`.
 3. The newest published version, resolved in this order:
    - `helm show chart oci://ghcr.io/k8s-stuff/helm-framework`
    - falling back to the gh-pages index (`helm repo add` + `helm search repo
@@ -18,13 +18,13 @@ Before touching anything, compare three versions:
 
 Three outcomes:
 
-- **newest > `1.1.0` (this skill's own baked version)** — the installed
+- **newest > `1.2.0` (this skill's own baked version)** — the installed
   plugin is stale. Tell the user to update the plugin before proceeding, and
   warn explicitly that this playbook may not know about values added in
   newer releases.
 - **pin < newest** — bump the dependency *before* migrating, so the
   migration work isn't done twice against two different contracts.
-- **every lookup failed** — degrade to comparing the pin against `1.1.0`
+- **every lookup failed** — degrade to comparing the pin against `1.2.0`
   only, and state plainly that the upper bound could not be verified.
 
 **Preflight advises; it never blocks.** Report what you found and proceed
