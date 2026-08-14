@@ -143,6 +143,15 @@ spec:
             - name: http
               containerPort: {{ (include "helm-framework.values.service.targetPort" .) }}
               protocol: TCP
+            {{- /* Declare a container port for every service.extraPorts entry that resolves to a number. A string targetPort references a port declared elsewhere, so nothing is added for it. */}}
+            {{- range $p := (.Values.service).extraPorts }}
+            {{- $targetPort := $p.targetPort | default $p.port }}
+            {{- if not (kindIs "string" $targetPort) }}
+            - name: {{ $p.name }}
+              containerPort: {{ $targetPort }}
+              protocol: {{ $p.protocol | default "TCP" }}
+            {{- end }}
+            {{- end }}
           {{- include "helm-framework.probes" (dict "healthChecks" .Values.healthChecks "portName" "http" "scheme" (include "helm-framework.values.service.targetScheme" .)) | nindent 10 }}
           {{- with .Values.envVars }}
           env:

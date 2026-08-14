@@ -21,6 +21,7 @@ is **not** in this list is not read by the library, full stop.
 - `envVars`
 - `envVarsFromSecret`
 - `externalSecrets`
+- `extraServices`
 - `forceReload`
 - `fullnameOverride`
 - `healthChecks`
@@ -86,6 +87,7 @@ not for authorizing deletion.
 - `envVars`
 - `envVarsFromSecret`
 - `externalSecrets`
+- `extraServices`
 - `forceReload`
 - `fullnameOverride`
 - `healthChecks`
@@ -205,6 +207,7 @@ not for authorizing deletion.
 - `service`
 - `service.annotations`
 - `service.externalTrafficPolicy`
+- `service.extraPorts`
 - `service.port`
 - `service.sessionAffinity`
 - `service.sessionAffinityConfig`
