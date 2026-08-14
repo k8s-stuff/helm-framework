@@ -20,6 +20,7 @@
     (include "helm-framework.deployment.authorizationPolicy" .)
     (include "helm-framework.deployment.ingress" .)
     (include "helm-framework.deployment.service" .)
+    (include "helm-framework.deployment.extra-services" .)
     (include "helm-framework.deployment.virtual-service" .)
     (include "helm-framework.deployment.httproute" .)
     (include "helm-framework.deployment.serviceAccount" .)

@@ -1,3 +1,49 @@
+{{/*
+Renders an arbitrary list of Service port entries. `name` is optional (a
+single-port Service may leave it out); _values-validation.tpl requires it once
+a Service exposes more than one port.
+*/}}
+{{- define "helm-framework.service.portList" -}}
+{{- range $p := .ports }}
+- port: {{ $p.port }}
+  targetPort: {{ $p.targetPort | default $p.port }}
+  protocol: {{ $p.protocol | default "TCP" }}
+  {{- with $p.name }}
+  name: {{ . }}
+  {{- end }}
+  {{- with $p.appProtocol }}
+  appProtocol: {{ . }}
+  {{- end }}
+  {{- with $p.nodePort }}
+  nodePort: {{ . }}
+  {{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+The canonical port list for this chart's workload: the main container's `http`
+port, then `service.extraPorts`, then one port per enabled sidecar. Both the
+main Service and any `extraServices` entry that omits `ports` render from here,
+so the two can't drift apart.
+*/}}
+{{- define "helm-framework.service.ports" -}}
+- port: {{ (include "helm-framework.values.service.port" .) }}
+  targetPort: http
+  protocol: TCP
+  name: http
+{{- with (.Values.service).extraPorts }}
+{{ include "helm-framework.service.portList" (dict "ports" .) | trim }}
+{{- end }}
+{{- range $sc := .Values.sidecars }}
+{{- if $sc.enabled }}
+- port: {{ include "helm-framework.values.service.port" $sc }}
+  targetPort: {{ include "helm-framework.sidecar.portName" $sc }}
+  protocol: TCP
+  name: {{ include "helm-framework.sidecar.portName" $sc }}
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{- define "helm-framework.deployment.service" -}}
 apiVersion: v1
 kind: Service
@@ -25,18 +71,67 @@ spec:
   {{- end }}
   {{- end }}
   ports:
-    - port: {{ (include "helm-framework.values.service.port" .) }}
-      targetPort: http
-      protocol: TCP
-      name: http
-    {{- range $sc := .Values.sidecars }}
-    {{- if $sc.enabled }}
-    - port: {{ include "helm-framework.values.service.port" $sc }}
-      targetPort: {{ include "helm-framework.sidecar.portName" $sc }}
-      protocol: TCP
-      name: {{ include "helm-framework.sidecar.portName" $sc }}
-    {{- end }}
-    {{- end }}
+    {{- include "helm-framework.service.ports" . | trim | nindent 4 }}
   selector:
     {{- include "helm-framework.selectorLabels" . | nindent 4 }}
+{{- end }}
+
+{{/*
+One additional Service, selecting the same pods as the main Service. Called per
+enabled `extraServices` entry with (dict "root" $ "svc" <entry>).
+*/}}
+{{- define "helm-framework.service.extra" -}}
+{{- $root := .root -}}
+{{- $svc := .svc -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "helm-framework.fullname" $root }}-{{ $svc.name }}
+  {{- with $svc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  labels:
+    {{- include "helm-framework.labels" $root | nindent 4 }}
+    {{- with $svc.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ $svc.type | default "ClusterIP" }}
+  {{- with $svc.clusterIP }}
+  clusterIP: {{ . }}
+  {{- end }}
+  {{- if $svc.publishNotReadyAddresses }}
+  publishNotReadyAddresses: true
+  {{- end }}
+  {{- with $svc.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
+  {{- with $svc.sessionAffinity }}
+  sessionAffinity: {{ . }}
+  {{- if and (eq . "ClientIP") (($svc.sessionAffinityConfig).clientIPTimeoutSeconds) }}
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: {{ $svc.sessionAffinityConfig.clientIPTimeoutSeconds }}
+  {{- end }}
+  {{- end }}
+  ports:
+    {{- if $svc.ports }}
+    {{- include "helm-framework.service.portList" (dict "ports" $svc.ports) | trim | nindent 4 }}
+    {{- else }}
+    {{- include "helm-framework.service.ports" $root | trim | nindent 4 }}
+    {{- end }}
+  selector:
+    {{- include "helm-framework.selectorLabels" $root | nindent 4 }}
+{{- end }}
+
+{{- define "helm-framework.deployment.extra-services" -}}
+{{- $root := . -}}
+{{- $rendered := list -}}
+{{- range $svc := .Values.extraServices }}
+{{- if $svc.enabled }}
+{{- $rendered = append $rendered (trim (include "helm-framework.service.extra" (dict "root" $root "svc" $svc))) -}}
+{{- end }}
+{{- end }}
+{{- $rendered | join "\n---\n" -}}
 {{- end }}

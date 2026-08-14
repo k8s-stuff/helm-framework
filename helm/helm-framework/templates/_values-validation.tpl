@@ -1,6 +1,7 @@
 {{/*
 Cross-cutting values validation for mechanisms not covered by
-_keda-validation.tpl / _autoscaling-validation.tpl: sidecars, jobs, ingress,
+_keda-validation.tpl / _autoscaling-validation.tpl: Service ports (main,
+service.extraPorts, sidecars), extraServices, sidecars, jobs, ingress,
 virtualService, authorizationPolicy, and podDisruptionBudget.
 */}}
 
@@ -8,6 +9,24 @@ virtualService, authorizationPolicy, and podDisruptionBudget.
 {{- $svcPort := (include "helm-framework.values.service.port" .) -}}
 {{- $seenNames := dict -}}
 {{- $seenPorts := dict (toString $svcPort) "service.port (main container)" -}}
+{{- $seenPortNames := dict "http" "the main container's Service port" -}}
+{{- range $index, $p := (.Values.service).extraPorts }}
+  {{- if not $p.name }}
+{{- fail (printf "service.extraPorts[%d] has no name: every entry must be named, since adding one makes the Service expose more than one port." $index) }}
+  {{- end }}
+  {{- if not $p.port }}
+{{- fail (printf "service.extraPorts[%d] (%s) has no port: set the port the Service should expose." $index $p.name) }}
+  {{- end }}
+  {{- if hasKey $seenPortNames $p.name }}
+{{- fail (printf "service.extraPorts[%d]'s name %q collides with %s: each port exposed on the chart's Service must have a unique name." $index $p.name (get $seenPortNames $p.name)) }}
+  {{- end }}
+  {{- $_ := set $seenPortNames $p.name (printf "service.extraPorts %q" $p.name) -}}
+  {{- $port := toString $p.port -}}
+  {{- if hasKey $seenPorts $port }}
+{{- fail (printf "service.extraPorts[%d] (%s) port %s collides with %s: each port exposed on the chart's Service must be unique." $index $p.name $port (get $seenPorts $port)) }}
+  {{- end }}
+  {{- $_ := set $seenPorts $port (printf "service.extraPorts %q" $p.name) -}}
+{{- end }}
 {{- range .Values.sidecars }}
 {{- if .enabled }}
   {{- $name := .name -}}
@@ -20,6 +39,50 @@ virtualService, authorizationPolicy, and podDisruptionBudget.
 {{- fail (printf "Sidecar %q's service.port %s collides with %s: each port exposed on the chart's Service must be unique." $name $port (get $seenPorts $port)) }}
   {{- end }}
   {{- $_ := set $seenPorts $port (printf "sidecar %q" $name) -}}
+  {{- $portName := include "helm-framework.sidecar.portName" . -}}
+  {{- if hasKey $seenPortNames $portName }}
+{{- fail (printf "Sidecar %q's derived Service port name %q collides with %s: each port exposed on the chart's Service must have a unique name (sidecar port names are \"sc-<name>\" truncated to 15 characters)." $name $portName (get $seenPortNames $portName)) }}
+  {{- end }}
+  {{- $_ := set $seenPortNames $portName (printf "sidecar %q" $name) -}}
+{{- end }}
+{{- end }}
+
+{{- $seenExtraServiceNames := dict -}}
+{{- range $index, $svc := .Values.extraServices }}
+{{- if $svc.enabled }}
+  {{- $svcName := $svc.name -}}
+  {{- if not $svcName }}
+{{- fail (printf "extraServices[%d] has no name: extraServices entries require a name (used to derive the Service resource name \"<fullname>-<name>\")." $index) }}
+  {{- end }}
+  {{- if hasKey $seenExtraServiceNames $svcName }}
+{{- fail (printf "Duplicate extraServices name %q: extraServices names must be unique (used to derive the Service resource name)." $svcName) }}
+  {{- end }}
+  {{- $_ := set $seenExtraServiceNames $svcName true -}}
+  {{- if and (($svc.sessionAffinityConfig).clientIPTimeoutSeconds) (ne ($svc.sessionAffinity | default "") "ClientIP") }}
+{{- fail (printf "extraServices[%d] (%s): sessionAffinityConfig.clientIPTimeoutSeconds is set but sessionAffinity is not \"ClientIP\": the timeout has no effect without ClientIP affinity." $index $svcName) }}
+  {{- end }}
+  {{- $seenSvcPorts := dict -}}
+  {{- $seenSvcPortNames := dict -}}
+  {{- $multiPort := gt (len ($svc.ports | default list)) 1 -}}
+  {{- range $portIndex, $p := $svc.ports }}
+    {{- if not $p.port }}
+{{- fail (printf "extraServices[%d] (%s) ports[%d] has no port: set the port the Service should expose." $index $svcName $portIndex) }}
+    {{- end }}
+    {{- if and $multiPort (not $p.name) }}
+{{- fail (printf "extraServices[%d] (%s) ports[%d] has no name: a Service exposing more than one port must name every port." $index $svcName $portIndex) }}
+    {{- end }}
+    {{- with $p.name }}
+    {{- if hasKey $seenSvcPortNames . }}
+{{- fail (printf "extraServices[%d] (%s) ports[%d]: duplicate port name %q — port names must be unique within a Service." $index $svcName $portIndex .) }}
+    {{- end }}
+    {{- $_ := set $seenSvcPortNames . true -}}
+    {{- end }}
+    {{- $port := toString $p.port -}}
+    {{- if hasKey $seenSvcPorts $port }}
+{{- fail (printf "extraServices[%d] (%s) ports[%d]: duplicate port %s — ports must be unique within a Service." $index $svcName $portIndex $port) }}
+    {{- end }}
+    {{- $_ := set $seenSvcPorts $port true -}}
+  {{- end }}
 {{- end }}
 {{- end }}
 

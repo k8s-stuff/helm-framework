@@ -178,7 +178,12 @@ hostAliases: []
 # `sessionAffinityConfig.clientIPTimeoutSeconds` (Kubernetes defaults to
 # 10800s/3h when ClientIP affinity is set without a timeout).
 # `externalTrafficPolicy` controls client-IP preservation for
-# `NodePort`/`LoadBalancer` service types.
+# `NodePort`/`LoadBalancer` service types. `extraPorts` exposes additional
+# ports of the *main* container on this same Service (sidecar ports come from
+# `sidecars[].service.port` instead); each entry needs a unique `name` and
+# `port`, and a matching `containerPort` is declared on the main container
+# whenever `targetPort` resolves to a number. Every port on the Service — main,
+# `extraPorts`, and sidecars — must have a unique name and number.
 service:
   type: ClusterIP
   port: 80
@@ -189,6 +194,44 @@ service:
   sessionAffinityConfig:
     clientIPTimeoutSeconds: 0
   externalTrafficPolicy: ""
+  extraPorts: []
+  # - name: grpc
+  #   port: 9090
+  #   targetPort: 9090      # optional, defaults to `port`; a string is treated
+  #                         # as a container port name declared elsewhere
+  #   protocol: TCP         # optional, defaults to TCP
+  #   appProtocol: kubernetes.io/h2c   # optional
+  #   nodePort: 30090       # optional, NodePort/LoadBalancer only
+
+# -- Additional Services in front of the same pods (list; one entry per
+# Service). Each entry renders `<fullname>-<name>` with this chart's standard
+# selector, so it always targets the same workload as the main Service — use it
+# for a headless Service for pod-level discovery, or a second Service with
+# different annotations or type. Omitting `ports` mirrors the main Service's
+# ports (main container + `service.extraPorts` + sidecars); set `ports`
+# explicitly to expose a different subset. A `name` is required on every port
+# once an entry exposes more than one.
+extraServices: []
+# - name: headless
+#   enabled: true
+#   type: ClusterIP
+#   clusterIP: None                    # headless
+#   publishNotReadyAddresses: true     # advertise pods before they're Ready
+#   annotations: {}
+#   labels: {}
+#   # ports omitted -> same ports as the main Service
+# - name: internal
+#   enabled: true
+#   type: LoadBalancer
+#   annotations:
+#     service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+#   externalTrafficPolicy: Local
+#   sessionAffinity: ClientIP
+#   sessionAffinityConfig:
+#     clientIPTimeoutSeconds: 3600
+#   ports:
+#     - port: 443
+#       targetPort: http               # container port name or number
 
 # -- Kubernetes Ingress configuration.
 ingress:
