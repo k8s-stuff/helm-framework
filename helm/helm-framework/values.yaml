@@ -359,9 +359,13 @@ healthChecks:
 # container ("RequestsAndLimits", VPA's own default, or "RequestsOnly"):
 #   - RequestsAndLimits (default): `requests` renders from here, `limits` is
 #     deferred to VPA (VPA sets both).
-#   - RequestsOnly: `limits` renders from here (VPA never touches limits in
-#     this mode, so this is the only place they can come from), `requests`
-#     is deferred to VPA.
+#   - RequestsOnly: both `requests` and `limits` render from here. VPA never
+#     touches limits in this mode, so this is the only place they can come
+#     from; `requests` must still render as the pre-VPA seed, because a
+#     container with limits and no requests gets its requests defaulted to
+#     the limits, making the pod Guaranteed QoS — and VPA can never lower
+#     requests below limits from there, since that would change QoS. Set
+#     `requests` to a realistic floor, not to the limits.
 # With updateMode "Off" (recommendation-only, the default) VPA never mutates
 # the pod at all, so both requests and limits set here always apply as-is.
 resources: {}

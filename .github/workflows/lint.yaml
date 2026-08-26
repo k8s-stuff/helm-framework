@@ -113,3 +113,36 @@ jobs:
             echo "::error::Expected 3 occurrences of 'initialDelaySeconds: 0' but found $zero_count. This means helm-framework.probes is using Helm's 'default' filter again, which treats an explicit 0 as empty and silently falls back to the hardcoded default (10/1/1) instead of honoring it - see _helpers.tpl's use of 'dig' for startup/liveness/readinessProbe.initialDelaySeconds."
             exit 1
           fi
+
+      # Under controlledValues: RequestsOnly the container used to render with
+      # limits and no requests. The API server then defaults requests to the
+      # limits, which makes the pod Guaranteed QoS - and VPA can never lower
+      # requests from there, because that changes QoS, which in-place resize
+      # rejects ("Pod QOS Class may not change as a result of resizing"). The
+      # net effect was every workload permanently reserving its full limit.
+      # Assert requests survive alongside limits in this mode.
+      - name: "Regression test - RequestsOnly must render requests alongside limits"
+        working-directory: helm/helm-framework-test-template
+        run: |
+          set -eu
+
+          rendered_vpa=$(helm template helm-framework-test-template . \
+            --set resources.requests.cpu=200m \
+            --set resources.requests.memory=512Mi \
+            --set resources.limits.cpu=1 \
+            --set resources.limits.memory=2Gi \
+            --set verticalPodAutoscaler.enabled=true \
+            --set verticalPodAutoscaler.updatePolicy.updateMode=InPlace \
+            --set 'verticalPodAutoscaler.containerPolicies[0].containerName=*' \
+            --set 'verticalPodAutoscaler.containerPolicies[0].controlledResources[0]=cpu' \
+            --set 'verticalPodAutoscaler.containerPolicies[0].controlledResources[1]=memory' \
+            --set 'verticalPodAutoscaler.containerPolicies[0].controlledValues=RequestsOnly')
+          echo "$rendered_vpa"
+
+          # `|| true` is required: grep -c exits 1 on a count of 0, which under
+          # `set -e` would abort before the diagnostic below can run.
+          req_count=$(echo "$rendered_vpa" | grep -c 'cpu: 200m' || true)
+          if [[ "$req_count" -lt 1 ]]; then
+            echo "::error::controlledValues: RequestsOnly rendered no resources.requests. A container with limits and no requests is Guaranteed QoS, which permanently blocks VPA from lowering requests - see the QoS note in _deployment.yaml."
+            exit 1
+          fi
