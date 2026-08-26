@@ -1,4 +1,4 @@
-# helm-framework values contract (v1.2.0)
+# helm-framework values contract (v1.2.1)
 
 Generated from `helm/helm-framework/templates/` and `helm/helm-framework/values.yaml`.
 Do not edit by hand. This is what the migration playbook uses to classify a
