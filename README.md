@@ -25,7 +25,7 @@ by `values.yaml`.
 ### OCI Registry (recommended)
 
 ```bash
-helm pull oci://ghcr.io/k8s-stuff/helm-framework --version 1.2.0
+helm pull oci://ghcr.io/k8s-stuff/helm-framework --version 1.2.1
 ```
 
 Or reference it directly as a dependency in your `Chart.yaml`:
@@ -33,7 +33,7 @@ Or reference it directly as a dependency in your `Chart.yaml`:
 ```yaml
 dependencies:
   - name: helm-framework
-    version: "1.2.0"
+    version: "1.2.1"
     repository: "oci://ghcr.io/k8s-stuff"
 ```
 
@@ -49,7 +49,7 @@ Then in your `Chart.yaml`:
 ```yaml
 dependencies:
   - name: helm-framework
-    version: "1.2.0"
+    version: "1.2.1"
     repository: "https://k8s-stuff.github.io/helm-framework"
 ```
 
