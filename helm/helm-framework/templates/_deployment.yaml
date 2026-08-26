@@ -167,6 +167,15 @@ spec:
           {{- $cv := include "helm-framework.vpa.controlledValues" (dict "root" $ "containerName" .Chart.Name) }}
           {{- $r := dict }}
           {{- if eq $cv "RequestsOnly" }}
+            {{- /* `requests` renders here too, even though VPA owns it. A container
+                   carrying limits and no requests has its requests defaulted to the
+                   limits by the API server, which makes the pod Guaranteed QoS. VPA
+                   can then never lower requests: that would flip QoS to Burstable,
+                   which in-place resize rejects outright ("Pod QOS Class may not
+                   change as a result of resizing"), and which Recreate modes undo on
+                   every recreate. The values here are only the pre-VPA seed - the
+                   recommender owns requests from its first update onwards. */}}
+            {{- with (.Values.resources).requests }}{{- $r = set $r "requests" . }}{{- end }}
             {{- with (.Values.resources).limits }}{{- $r = set $r "limits" . }}{{- end }}
           {{- else }}
             {{- with (.Values.resources).requests }}{{- $r = set $r "requests" . }}{{- end }}
@@ -244,6 +253,9 @@ spec:
           {{- $cv := include "helm-framework.vpa.controlledValues" (dict "root" $ "containerName" $scContainerName) }}
           {{- $r := dict }}
           {{- if eq $cv "RequestsOnly" }}
+            {{- /* See the QoS note on the main container above: limits without
+                   requests pins the pod to Guaranteed and locks VPA out. */}}
+            {{- with ($sc.resources).requests }}{{- $r = set $r "requests" . }}{{- end }}
             {{- with ($sc.resources).limits }}{{- $r = set $r "limits" . }}{{- end }}
           {{- else }}
             {{- with ($sc.resources).requests }}{{- $r = set $r "requests" . }}{{- end }}
