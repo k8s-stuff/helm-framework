@@ -60,6 +60,7 @@ every configurable value, grouped into these sections:
 - STORAGE
 - SCHEDULING
 - JOBS
+- LIQUIBASE DATABASE MIGRATIONS
 - SIDECARS
 - APPLICATION CONFIGURATION
 

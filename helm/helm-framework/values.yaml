@@ -808,9 +808,10 @@ liquibase:
     # INFO, FINE, or OFF.
     level: INFO
   database:
-    # -- sqlserver | postgresql | mysql | oracle. Selects the default port and
-    # the built-in JDBC URL template. An unrecognised engine is allowed only
-    # together with an explicit `urlTemplate` AND an explicit `port`.
+    # -- One of `sqlserver`, `postgresql`, `mysql`, or `oracle`. Selects the
+    # default port and the built-in JDBC URL template. An unrecognised engine is
+    # allowed only together with an explicit `urlTemplate` AND an explicit
+    # `port`.
     engine: sqlserver
     # -- Database host. Required unless `url` is set.
     host: ""
