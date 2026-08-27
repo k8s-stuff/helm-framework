@@ -131,11 +131,18 @@ The Job container receives:
 
 | Variable | Source |
 |---|---|
-| `LIQUIBASE_COMMAND_URL` | composed as above |
-| `LIQUIBASE_COMMAND_USERNAME` | `database.userName`, or `secretKeyRef` when `existingSecret.name` is set |
-| `LIQUIBASE_COMMAND_PASSWORD` | `database.password`, or `secretKeyRef` when `existingSecret.name` is set |
+| `LIQUIBASE_COMMAND_URL` | plain `value:`, composed as above |
+| `LIQUIBASE_COMMAND_USERNAME` | `secretKeyRef` — the generated Secret, or `existingSecret` when set |
+| `LIQUIBASE_COMMAND_PASSWORD` | `secretKeyRef` — the generated Secret, or `existingSecret` when set |
 | `LIQUIBASE_LOG_LEVEL` | `log.level` |
 | `LIQUIBASE_SEARCH_PATH` | `dir changelog.mountPath` (so `/liquibase` by default), making the default `--changeLogFile=changelog.xml` resolve against the mount even if `mountPath` is overridden |
+
+The URL is a plain `value:` rather than a Secret key: a JDBC URL is a
+connection target, not a credential, and keeping it in the pod spec makes
+`kubectl describe job` diagnostic. Only the username and password are
+Secret-sourced. Consequently the generated Secret holds exactly two keys,
+`LIQUIBASE_COMMAND_USERNAME` and `LIQUIBASE_COMMAND_PASSWORD`, and is skipped
+entirely when `existingSecret.name` is set.
 
 `extraEnvVars` is appended, and `extraEnvFrom` is passed through `tpl` so it
 can reference other helpers (matching how the reference chart references a
@@ -199,12 +206,15 @@ To avoid maintaining two divergent pod specs, the common parts of
 |---|---|
 | `helm-framework.job.podAnnotations` | appSettings / helmFrameworkSettings checksums plus `podAnnotations` |
 | `helm-framework.job.podLabels` | `helm-framework.labels` plus `podLabels` |
-| `helm-framework.job.imagePullSecrets` | `imagePullSecrets` block |
 | `helm-framework.job.caBundleInit` | the `ca-bundle-init` init container |
 | `helm-framework.job.resources` | VPA-aware resources; takes `dict "root" $ "resources" $res` |
 | `helm-framework.job.commonVolumes` | appSettings, cert-combine, scripts, authorities volumes |
 | `helm-framework.job.commonVolumeMounts` | appSettings and ca-bundle mounts |
 | `helm-framework.job.scheduling` | `nodeSelector`, `affinity`, `tolerations` |
+
+`imagePullSecrets` is deliberately *not* extracted: it is four lines of pure
+`with` + `toYaml` passthrough with no logic that can drift, so a partial would
+add byte-identity risk to the refactor without reducing maintenance.
 
 This refactor lands first and must be provably behaviour-preserving: the
 `helm template` output of `helm/helm-framework-test-template` must diff empty
@@ -274,6 +284,15 @@ carry binary content).
   `helm/helm-framework/values.yaml`, and vice versa. Adding `liquibase` to
   both sides satisfies it; `scripts/generate-skill.test.mjs` exercises the
   guard.
+
+  Two consequences for sequencing. First, the guard is bidirectional, so the
+  `liquibase:` declaration in `values.yaml` and the first template that reads
+  `.Values.liquibase` must land in the *same* commit — either alone leaves
+  `npm test` red. Second, the read-set is detected by the regex
+  `/\.Values\.([A-Za-z0-9_]+)/`, so at least one template must spell it
+  literally as `.Values.liquibase`; the framework's defensive
+  `(.Values.liquibase).foo` form satisfies this, but a hypothetical
+  `(.Values).liquibase` would not.
 - Manual verification that the rendered Deployment's `wait-for-job` init
   container lists the Liquibase Job, and that hook weights order the
   ConfigMaps and Secret before the Job.
@@ -283,7 +302,11 @@ carry binary content).
 - A `LIQUIBASE` section in `helm/helm-framework/values.yaml`, following the
   file's existing convention of a live default block followed by a commented
   full reference.
-- A row in the root `README.md` template table.
+  The chart's own `helm/helm-framework/README.md` is auto-generated from those
+  `# --` comments by the `Docs` workflow (`losisin/helm-docs-github-action`),
+  so it is never hand-edited. The root `README.md` has no per-template table —
+  it points at the generated chart README — so no root README change is
+  needed.
 - Regenerated plugin skill via `node scripts/generate-skill.mjs --version
   <X.Y.Z>`, which rewrites
   `plugins/helm-framework/skills/helm-framework/resources/values-reference.md`
