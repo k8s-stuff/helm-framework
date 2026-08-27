@@ -70,8 +70,13 @@ Create the name of the service account to use
 {{- end -}}
 
 {{/*
-Returns "true" when at least one enabled job is flagged with waitForIt.
+Returns "true" when at least one enabled job is flagged with waitForIt, or
+when the native Liquibase migration is enabled and not opted out of waiting.
 Used to auto-provision RBAC so the wait-for-job init container can read jobs.
+
+liquibase.waitForIt defaults to TRUE, so the check is "key absent OR truthy" —
+`and $lb.enabled $lb.waitForIt` would wrongly skip the wait whenever a chart
+enables liquibase without restating waitForIt.
 */}}
 {{- define "helm-framework.waitFor.active" -}}
 {{- $active := false -}}
@@ -79,6 +84,10 @@ Used to auto-provision RBAC so the wait-for-job init container can read jobs.
 {{- if and $job.enabled $job.waitForIt -}}
 {{- $active = true -}}
 {{- end -}}
+{{- end -}}
+{{- $lb := (.Values.liquibase | default dict) -}}
+{{- if and $lb.enabled (or (not (hasKey $lb "waitForIt")) $lb.waitForIt) -}}
+{{- $active = true -}}
 {{- end -}}
 {{- if $active }}true{{- end -}}
 {{- end -}}

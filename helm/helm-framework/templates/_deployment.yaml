@@ -64,8 +64,13 @@ spec:
       hostAliases:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- /* Collect names of enabled jobs flagged with waitForIt: true */ -}}
+      {{- /* Collect names of enabled jobs flagged with waitForIt: true, plus
+             the native Liquibase migration Job (which waits by default) */ -}}
       {{- $waitForJobs := list -}}
+      {{- $lb := (.Values.liquibase | default dict) -}}
+      {{- if and $lb.enabled (or (not (hasKey $lb "waitForIt")) $lb.waitForIt) -}}
+        {{- $waitForJobs = append $waitForJobs (printf "job/%s" (include "helm-framework.liquibase.job-name" $)) -}}
+      {{- end -}}
       {{- range $index, $job := .Values.jobs -}}
         {{- if and $job.enabled $job.waitForIt -}}
           {{- $jobName := $job.name | default (printf "job-%d" $index) -}}
