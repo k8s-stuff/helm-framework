@@ -7,6 +7,7 @@
     (include "helm-framework.deployment.pdb" .)
     (include "helm-framework.deployment.secret-tls" .)
     (include "helm-framework.deployment.job" .)
+    (include "helm-framework.deployment.liquibase-configmaps" .)
     (include "helm-framework.deployment.secret-scripts" .)
     (include "helm-framework.deployment.secret-authorities" .)
     (include "helm-framework.deployment.secret-env" .)

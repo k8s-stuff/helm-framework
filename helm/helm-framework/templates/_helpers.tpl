@@ -253,3 +253,56 @@ Consumers that want a hardened posture set the fields themselves, e.g.
 {{- printf "false" }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Liquibase resource names. Everything derives from
+<fullname>-<liquibase.name> so the Job, its ConfigMaps, and its Secret stay
+grouped and predictable.
+*/}}
+{{- define "helm-framework.liquibase.name" -}}
+{{- (.Values.liquibase).name | default "liquibase" }}
+{{- end }}
+
+{{- define "helm-framework.liquibase.job-name" -}}
+{{- include "helm-framework.fullname" . }}-{{ include "helm-framework.liquibase.name" . }}
+{{- end }}
+
+{{- define "helm-framework.liquibase.changelog-configmap-name" -}}
+{{- include "helm-framework.liquibase.job-name" . }}-changelog
+{{- end }}
+
+{{- define "helm-framework.liquibase.migrations-configmap-name" -}}
+{{- include "helm-framework.liquibase.job-name" . }}-migrations
+{{- end }}
+
+{{- define "helm-framework.liquibase.env-secret-name" -}}
+{{- include "helm-framework.liquibase.job-name" . }}-env
+{{- end }}
+
+{{/*
+The changelog's ConfigMap key, which is also the volume subPath. Derived from
+changelog.mountPath's basename so the ConfigMap, the mount, and
+LIQUIBASE_SEARCH_PATH can never disagree.
+*/}}
+{{- define "helm-framework.liquibase.changelog-key" -}}
+{{- base (((.Values.liquibase).changelog).mountPath | default "/liquibase/changelog.xml") }}
+{{- end }}
+
+{{/*
+Returns "true" when at least one migration file resolves, from either
+migrations.paths globs or the inline migrations.files map. Used to decide
+whether the migrations ConfigMap, volume, and mount are rendered at all — a
+self-contained changelog needs none of them.
+*/}}
+{{- define "helm-framework.liquibase.has-migrations" -}}
+{{- $found := false -}}
+{{- if ((.Values.liquibase).migrations).files -}}
+{{- $found = true -}}
+{{- end -}}
+{{- range $pattern := ((.Values.liquibase).migrations).paths -}}
+{{- if $.Files.Glob $pattern -}}
+{{- $found = true -}}
+{{- end -}}
+{{- end -}}
+{{- if $found }}true{{- end -}}
+{{- end }}
