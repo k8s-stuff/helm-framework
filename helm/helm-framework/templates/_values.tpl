@@ -51,3 +51,24 @@ podAntiAffinity:
             values:
             - {{ include "helm-framework.name" . }}
 {{- end }}
+
+{{/*
+Liquibase engine defaults. `get` on an unrecognised engine returns the zero
+value (0 / ""), which _values-validation.tpl turns into an actionable error
+rather than a silent bad URL.
+*/}}
+{{- define "helm-framework.values.liquibase.port" -}}
+{{- $engine := (((.Values.liquibase).database).engine | default "sqlserver") -}}
+{{- $ports := dict "sqlserver" 1433 "postgresql" 5432 "mysql" 3306 "oracle" 1521 -}}
+{{- (((.Values.liquibase).database).port | default (get $ports $engine)) -}}
+{{- end }}
+
+{{- define "helm-framework.values.liquibase.urlTemplate" -}}
+{{- $engine := (((.Values.liquibase).database).engine | default "sqlserver") -}}
+{{- $templates := dict
+    "sqlserver" "jdbc:sqlserver://%s:%s;database=%s;"
+    "postgresql" "jdbc:postgresql://%s:%s/%s"
+    "mysql" "jdbc:mysql://%s:%s/%s"
+    "oracle" "jdbc:oracle:thin:@%s:%s/%s" -}}
+{{- (((.Values.liquibase).database).urlTemplate | default (get $templates $engine)) -}}
+{{- end }}

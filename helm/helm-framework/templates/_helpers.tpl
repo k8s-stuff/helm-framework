@@ -306,3 +306,66 @@ self-contained changelog needs none of them.
 {{- end -}}
 {{- if $found }}true{{- end -}}
 {{- end }}
+
+{{/*
+The composed JDBC URL. `database.url` wins outright and is tpl-rendered so it
+can reference other values; otherwise the engine (or overridden) printf
+template is filled with host, resolved port, and database name.
+*/}}
+{{- define "helm-framework.liquibase.url" -}}
+{{- $db := ((.Values.liquibase).database | default dict) -}}
+{{- if $db.url -}}
+{{- tpl $db.url . -}}
+{{- else -}}
+{{- printf (include "helm-framework.values.liquibase.urlTemplate" .) ($db.host | toString) (include "helm-framework.values.liquibase.port" .) ($db.name | toString) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The Liquibase Job container's env list, at relative indent 0.
+
+The URL is a plain value: a connection target is not a credential, and keeping
+it in the pod spec makes `kubectl describe job` diagnostic. Only the username
+and password are Secret-sourced — from the generated Secret, or from
+database.existingSecret when that is set.
+
+LIQUIBASE_SEARCH_PATH is the changelog mount's directory, so the default
+`--changeLogFile=changelog.xml` keeps resolving even if mountPath is changed.
+*/}}
+{{- define "helm-framework.liquibase.env" -}}
+{{- $db := ((.Values.liquibase).database | default dict) -}}
+{{- $existing := ($db.existingSecret | default dict) -}}
+{{- $changelogMount := (((.Values.liquibase).changelog).mountPath | default "/liquibase/changelog.xml") -}}
+- name: LIQUIBASE_COMMAND_URL
+  value: {{ include "helm-framework.liquibase.url" . | quote }}
+{{- if $existing.name }}
+- name: LIQUIBASE_COMMAND_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: {{ tpl $existing.name . | quote }}
+      key: {{ $existing.usernameKey | default "username" | quote }}
+- name: LIQUIBASE_COMMAND_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ tpl $existing.name . | quote }}
+      key: {{ $existing.passwordKey | default "password" | quote }}
+{{- else }}
+- name: LIQUIBASE_COMMAND_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "helm-framework.liquibase.env-secret-name" . | quote }}
+      key: LIQUIBASE_COMMAND_USERNAME
+- name: LIQUIBASE_COMMAND_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "helm-framework.liquibase.env-secret-name" . | quote }}
+      key: LIQUIBASE_COMMAND_PASSWORD
+{{- end }}
+- name: LIQUIBASE_LOG_LEVEL
+  value: {{ (((.Values.liquibase).log).level | default "INFO") | quote }}
+- name: LIQUIBASE_SEARCH_PATH
+  value: {{ dir $changelogMount | quote }}
+{{- with (.Values.liquibase).extraEnvVars }}
+{{ tpl (toYaml .) $ | trim }}
+{{- end }}
+{{- end }}
