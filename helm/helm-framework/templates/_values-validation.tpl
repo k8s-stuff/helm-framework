@@ -133,4 +133,45 @@ virtualService, authorizationPolicy, and podDisruptionBudget.
 {{- end }}
 {{- end }}
 
+{{- if (.Values.liquibase).enabled }}
+{{- $lb := .Values.liquibase -}}
+{{- $db := ($lb.database | default dict) -}}
+{{- $existing := ($db.existingSecret | default dict) -}}
+{{- $engines := list "sqlserver" "postgresql" "mysql" "oracle" -}}
+{{- $customUrl := or $db.url $db.urlTemplate -}}
+  {{- if and (not $db.url) (or (not $db.host) (not $db.name)) }}
+{{- fail "liquibase.enabled is true but the database is not addressable: set liquibase.database.host and liquibase.database.name, or set liquibase.database.url to a literal JDBC URL." }}
+  {{- end }}
+  {{- if and (not ($lb.changelog | default dict).file) (not ($lb.changelog | default dict).content) }}
+{{- fail "liquibase.enabled is true but no changelog is configured: set liquibase.changelog.file to a path inside your chart (e.g. \"liquibase/changelog.xml\"), or liquibase.changelog.content to an inline changelog." }}
+  {{- end }}
+  {{- if and (not $customUrl) (not (has ($db.engine | default "sqlserver") $engines)) }}
+{{- fail (printf "liquibase.database.engine %q is not one of %s: pick a supported engine, or set liquibase.database.urlTemplate (and liquibase.database.port) to drive an unsupported driver yourself." ($db.engine | default "sqlserver") (join ", " $engines)) }}
+  {{- end }}
+  {{- if and (not (has ($db.engine | default "sqlserver") $engines)) (not $db.url) (not $db.port) }}
+{{- fail (printf "liquibase.database.engine %q is unrecognised and liquibase.database.port is unset: there is no engine default to fall back on, so set the port explicitly." ($db.engine | default "sqlserver")) }}
+  {{- end }}
+  {{- if and $existing.name $db.password }}
+{{- fail "liquibase.database.existingSecret.name and liquibase.database.password are both set: it is ambiguous which credential wins. Unset password to source it from the existing Secret, or unset existingSecret.name to use the generated one." }}
+  {{- end }}
+  {{- with ($lb.changelog | default dict).file }}
+    {{- if not ($.Files.Get .) }}
+{{- fail (printf "liquibase.changelog.file %q resolves to nothing in this chart: .Files.Get returned empty, which would ship an empty changelog ConfigMap and a migration that silently does nothing. Check the path is relative to your chart root and that the file is not excluded by .helmignore." .) }}
+    {{- end }}
+  {{- end }}
+  {{- range $pattern := ($lb.migrations | default dict).paths }}
+    {{- if not ($.Files.Glob $pattern) }}
+{{- fail (printf "liquibase.migrations.paths pattern %q matches no files in this chart: this would ship an empty migrations ConfigMap. Check the glob is relative to your chart root and that the files are not excluded by .helmignore." $pattern) }}
+    {{- end }}
+  {{- end }}
+  {{- $lbName := include "helm-framework.liquibase.name" . -}}
+  {{- range $index, $job := .Values.jobs }}
+    {{- if $job.enabled }}
+      {{- if eq ($job.name | default (printf "job-%d" $index)) $lbName }}
+{{- fail (printf "jobs[%d]'s name %q collides with liquibase.name: both would render a Job named \"<fullname>-%s\". Rename one of them." $index $lbName $lbName) }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+
 {{- end -}}
