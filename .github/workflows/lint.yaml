@@ -146,3 +146,63 @@ jobs:
             echo "::error::controlledValues: RequestsOnly rendered no resources.requests. A container with limits and no requests is Guaranteed QoS, which permanently blocks VPA from lowering requests - see the QoS note in _deployment.yaml."
             exit 1
           fi
+
+      # The whole point of native Liquibase support is that application pods do
+      # not start before the migration finishes. That guarantee lives in two
+      # places that are easy to break independently: waitFor.active (which
+      # provisions the RBAC and the ServiceAccount token) and the Deployment's
+      # $waitForJobs list (which builds the kubectl wait arguments). Assert the
+      # migration Job is actually waited on, and that the ConfigMaps and Secret
+      # it depends on are hook-weighted ahead of it.
+      - name: "Regression test - liquibase migration must block pod startup"
+        working-directory: helm/helm-framework-test-template
+        run: |
+          set -eu
+
+          rendered_lb=$(helm template helm-framework-test-template .)
+          echo "$rendered_lb"
+
+          # `|| true` is required: grep -c exits 1 on a count of 0, which under
+          # `set -e` would abort before the diagnostic below can run.
+          wait_count=$(echo "$rendered_lb" | grep -c 'job/helm-framework-test-template-liquibase' || true)
+          if [[ "$wait_count" -lt 1 ]]; then
+            echo "::error::The Deployment's wait-for-job init container does not reference the Liquibase Job. Application pods would start before the migration completes - see helm-framework.waitFor.active in _helpers.tpl and the \$waitForJobs list in _deployment.yaml. Note liquibase.waitForIt defaults to true, so an 'and \$lb.enabled \$lb.waitForIt' check silently skips it."
+            exit 1
+          fi
+
+          rbac_count=$(echo "$rendered_lb" | grep -c 'helm-framework-test-template-wait-for-jobs' || true)
+          if [[ "$rbac_count" -lt 2 ]]; then
+            echo "::error::Expected a wait-for-jobs Role AND RoleBinding (2+ references) but found $rbac_count. Without them the init container cannot read Job status and pod startup hangs until the wait times out - see helm-framework.deployment.waitFor.rbac in _role.tpl."
+            exit 1
+          fi
+
+          cm_weight=$(echo "$rendered_lb" | grep -c 'helm.sh/hook-weight: "-20"' || true)
+          if [[ "$cm_weight" -lt 3 ]]; then
+            echo "::error::Expected at least 3 resources at hook-weight -20 (changelog ConfigMap, migrations ConfigMap, credentials Secret) but found $cm_weight. At a weight >= the Job's -10 they would be created after it, and the migration pod would fail to mount them."
+            exit 1
+          fi
+
+      # database.existingSecret is the only supported path for production
+      # credentials. If the generated Secret is still rendered alongside it, a
+      # plaintext password from values.yaml lands in the cluster anyway.
+      - name: "Regression test - existingSecret must suppress the generated Secret"
+        working-directory: helm/helm-framework-test-template
+        run: |
+          set -eu
+
+          rendered_ext=$(helm template helm-framework-test-template . \
+            --set liquibase.database.password=null \
+            --set liquibase.database.existingSecret.name=external-db-credentials)
+          echo "$rendered_ext"
+
+          gen_count=$(echo "$rendered_ext" | grep -c 'name: helm-framework-test-template-liquibase-env' || true)
+          if [[ "$gen_count" -ne 0 ]]; then
+            echo "::error::database.existingSecret.name is set but the generated credentials Secret was still rendered ($gen_count references). See the existingSecret guard in _secret-liquibase.tpl."
+            exit 1
+          fi
+
+          ref_count=$(echo "$rendered_ext" | grep -c 'name: "external-db-credentials"' || true)
+          if [[ "$ref_count" -lt 2 ]]; then
+            echo "::error::Expected the Job's username and password to both reference external-db-credentials (2 secretKeyRefs) but found $ref_count. See helm-framework.liquibase.env in _helpers.tpl."
+            exit 1
+          fi

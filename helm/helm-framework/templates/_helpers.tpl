@@ -70,8 +70,13 @@ Create the name of the service account to use
 {{- end -}}
 
 {{/*
-Returns "true" when at least one enabled job is flagged with waitForIt.
+Returns "true" when at least one enabled job is flagged with waitForIt, or
+when the native Liquibase migration is enabled and not opted out of waiting.
 Used to auto-provision RBAC so the wait-for-job init container can read jobs.
+
+liquibase.waitForIt defaults to TRUE, so the check is "key absent OR truthy" —
+`and $lb.enabled $lb.waitForIt` would wrongly skip the wait whenever a chart
+enables liquibase without restating waitForIt.
 */}}
 {{- define "helm-framework.waitFor.active" -}}
 {{- $active := false -}}
@@ -79,6 +84,10 @@ Used to auto-provision RBAC so the wait-for-job init container can read jobs.
 {{- if and $job.enabled $job.waitForIt -}}
 {{- $active = true -}}
 {{- end -}}
+{{- end -}}
+{{- $lb := (.Values.liquibase | default dict) -}}
+{{- if and $lb.enabled (or (not (hasKey $lb "waitForIt")) $lb.waitForIt) -}}
+{{- $active = true -}}
 {{- end -}}
 {{- if $active }}true{{- end -}}
 {{- end -}}
@@ -253,3 +262,150 @@ Consumers that want a hardened posture set the fields themselves, e.g.
 {{- printf "false" }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Liquibase resource names. Everything derives from
+<fullname>-<liquibase.name> so the Job, its ConfigMaps, and its Secret stay
+grouped and predictable.
+*/}}
+{{- define "helm-framework.liquibase.name" -}}
+{{- (.Values.liquibase).name | default "liquibase" }}
+{{- end }}
+
+{{- define "helm-framework.liquibase.job-name" -}}
+{{- include "helm-framework.fullname" . }}-{{ include "helm-framework.liquibase.name" . }}
+{{- end }}
+
+{{- define "helm-framework.liquibase.changelog-configmap-name" -}}
+{{- include "helm-framework.liquibase.job-name" . }}-changelog
+{{- end }}
+
+{{- define "helm-framework.liquibase.migrations-configmap-name" -}}
+{{- include "helm-framework.liquibase.job-name" . }}-migrations
+{{- end }}
+
+{{- define "helm-framework.liquibase.env-secret-name" -}}
+{{- include "helm-framework.liquibase.job-name" . }}-env
+{{- end }}
+
+{{/*
+The changelog's ConfigMap key, which is also the volume subPath. Derived from
+changelog.mountPath's basename so the ConfigMap, the mount, and
+LIQUIBASE_SEARCH_PATH can never disagree.
+*/}}
+{{- define "helm-framework.liquibase.changelog-key" -}}
+{{- base (((.Values.liquibase).changelog).mountPath | default "/liquibase/changelog.xml") }}
+{{- end }}
+
+{{/*
+Returns "true" when at least one migration file resolves, from either
+migrations.paths globs or the inline migrations.files map. Used to decide
+whether the migrations ConfigMap, volume, and mount are rendered at all — a
+self-contained changelog needs none of them.
+*/}}
+{{- define "helm-framework.liquibase.has-migrations" -}}
+{{- $found := false -}}
+{{- if ((.Values.liquibase).migrations).files -}}
+{{- $found = true -}}
+{{- end -}}
+{{- range $pattern := ((.Values.liquibase).migrations).paths -}}
+{{- if $.Files.Glob $pattern -}}
+{{- $found = true -}}
+{{- end -}}
+{{- end -}}
+{{- if $found }}true{{- end -}}
+{{- end }}
+
+{{/*
+The JDBC URL. Two mutually exclusive ways to supply it, both fully in the
+chart author's hands — the framework ships no per-engine defaults, so adding
+or renaming a driver is never a breaking change here:
+
+  database.url          a literal JDBC URL, rendered through `tpl` so it can
+                        reference other values. Total control: any driver, any
+                        vendor-specific parameter, credentials embedded if the
+                        driver demands it.
+  database.urlTemplate  a template with NAMED placeholders `{host}`, `{port}`
+                        and `{name}`. Keeps host/port/name as separate values
+                        so a per-environment overlay can change just the host.
+
+Placeholders are named rather than positional on purpose. An earlier revision
+used printf `%s` verbs, which are filled in argument order: a template written
+`jdbc://%s/%s:%s` meaning name/host/port silently received host/port/name,
+producing a syntactically valid URL that only failed when the migration tried
+to connect. Named placeholders cannot be mis-ordered, and each is optional —
+use only the ones your driver's URL actually needs.
+
+`url` wins when both are set.
+*/}}
+{{- define "helm-framework.liquibase.url" -}}
+{{- $db := ((.Values.liquibase).database | default dict) -}}
+{{- if $db.url -}}
+{{- tpl $db.url . -}}
+{{- else -}}
+{{- $url := $db.urlTemplate | toString -}}
+{{- $url = $url | replace "{host}" ($db.host | toString) -}}
+{{- $url = $url | replace "{port}" ($db.port | toString) -}}
+{{- $url = $url | replace "{name}" ($db.name | toString) -}}
+{{- $url -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The placeholder names `database.urlTemplate` understands. Single source of
+truth shared by the URL composer above and the validation in
+_values-validation.tpl, so an added placeholder cannot be accepted by one and
+rejected by the other.
+*/}}
+{{- define "helm-framework.liquibase.urlTemplate.placeholders" -}}
+host port name
+{{- end }}
+
+{{/*
+The Liquibase Job container's env list, at relative indent 0.
+
+The URL is a plain value: a connection target is not a credential, and keeping
+it in the pod spec makes `kubectl describe job` diagnostic. Only the username
+and password are Secret-sourced — from the generated Secret, or from
+database.existingSecret when that is set.
+
+LIQUIBASE_SEARCH_PATH is the changelog mount's directory, so the default
+`--changeLogFile=changelog.xml` keeps resolving even if mountPath is changed.
+*/}}
+{{- define "helm-framework.liquibase.env" -}}
+{{- $db := ((.Values.liquibase).database | default dict) -}}
+{{- $existing := ($db.existingSecret | default dict) -}}
+{{- $changelogMount := (((.Values.liquibase).changelog).mountPath | default "/liquibase/changelog.xml") -}}
+- name: LIQUIBASE_COMMAND_URL
+  value: {{ include "helm-framework.liquibase.url" . | quote }}
+{{- if $existing.name }}
+- name: LIQUIBASE_COMMAND_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: {{ tpl $existing.name . | quote }}
+      key: {{ $existing.usernameKey | default "username" | quote }}
+- name: LIQUIBASE_COMMAND_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ tpl $existing.name . | quote }}
+      key: {{ $existing.passwordKey | default "password" | quote }}
+{{- else }}
+- name: LIQUIBASE_COMMAND_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "helm-framework.liquibase.env-secret-name" . | quote }}
+      key: LIQUIBASE_COMMAND_USERNAME
+- name: LIQUIBASE_COMMAND_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "helm-framework.liquibase.env-secret-name" . | quote }}
+      key: LIQUIBASE_COMMAND_PASSWORD
+{{- end }}
+- name: LIQUIBASE_LOG_LEVEL
+  value: {{ (((.Values.liquibase).log).level | default "INFO") | quote }}
+- name: LIQUIBASE_SEARCH_PATH
+  value: {{ dir $changelogMount | quote }}
+{{- with (.Values.liquibase).extraEnvVars }}
+{{ tpl (toYaml .) $ | trim }}
+{{- end }}
+{{- end }}

@@ -773,6 +773,113 @@ jobs: []
 #    envFrom: []              # raw envFrom sources (secretRef/configMapRef)
 
 # =============================================================================
+# LIQUIBASE DATABASE MIGRATIONS
+# =============================================================================
+
+# -- Native Liquibase migration support. Renders a pre-install/pre-upgrade hook
+# Job that runs Liquibase against your database, plus ConfigMaps holding your
+# changelog and migration SQL and a Secret holding the database credentials.
+# With `waitForIt` (the default) the Deployment's pods get a wait-for-job init
+# container and will not start until the migration Job completes. Changelog and
+# migration files are read from YOUR chart's directory via `.Files`, so the SQL
+# lives as real files beside your chart rather than inside values.yaml.
+liquibase:
+  enabled: false
+  # -- Suffix for every generated resource name: Job `<fullname>-<name>`, plus
+  # `-changelog` / `-migrations` / `-env`. Must not collide with a `jobs[]` name.
+  name: liquibase
+  # -- Block Deployment pod startup until the migration Job completes. Reuses
+  # the same wait-for-job init container and auto-provisioned RBAC as
+  # `jobs[].waitForIt` — see `initContainer.waitFor` to tune image and timeout.
+  waitForIt: true
+  restartPolicy: OnFailure
+  backoffLimit: 6
+  image:
+    repository: liquibase/liquibase
+    tag: "4.33"
+    pullPolicy: IfNotPresent
+  command:
+    - liquibase
+  args:
+    - update
+    - "--changeLogFile=changelog.xml"
+  log:
+    # -- Liquibase log level, passed as LIQUIBASE_LOG_LEVEL: SEVERE, WARNING,
+    # INFO, FINE, or OFF.
+    level: INFO
+  database:
+    # -- Literal JDBC URL, rendered through `tpl` so it can reference other
+    # values. The most direct option and the one to reach for when the
+    # connection needs vendor-specific parameters: the framework never parses
+    # or rewrites it. Wins outright when `urlTemplate` is also set. Example:
+    # "jdbc:sqlserver://sql-server:1433;database=MyStore;encrypt=false;"
+    url: ""
+    # -- Alternative to `url`: a URL template using the NAMED placeholders
+    # `{host}`, `{port}` and `{name}`. Use it to keep host/port/name as separate
+    # values, so a per-environment overlay can change just the host. Each
+    # placeholder is optional — use only the ones your driver's URL needs — but
+    # any you do use must have a value set below. The framework deliberately
+    # ships NO per-driver defaults, so a new or renamed driver can never turn
+    # into a breaking change here. Examples:
+    #   SQL Server: "jdbc:sqlserver://{host}:{port};database={name};"
+    #   PostgreSQL: "jdbc:postgresql://{host}:{port}/{name}"
+    #   MySQL:      "jdbc:mysql://{host}:{port}/{name}"
+    #   Oracle:     "jdbc:oracle:thin:@{host}:{port}/{name}"
+    # Placeholders are named, not positional: printf-style `%s` verbs are
+    # rejected, because a template whose verb order differed from host, port,
+    # name silently produced a valid-looking but wrong URL. For anything these
+    # three cannot express, use `url` instead.
+    urlTemplate: ""
+    # -- Database host. Required when `urlTemplate` uses `{host}`.
+    host: ""
+    # -- Database port. Required when `urlTemplate` uses `{port}`; there is no
+    # default, since the framework does not know your driver.
+    port: 0
+    # -- Database name. Required when `urlTemplate` uses `{name}`.
+    name: ""
+    userName: ""
+    password: ""
+    # -- Source credentials from an existing Secret instead of `userName` and
+    # `password`. When `name` is set, no connection Secret is generated and the
+    # username/password come from secretKeyRef — use this with ExternalSecret
+    # rather than putting a production password in values.yaml.
+    existingSecret:
+      name: ""
+      usernameKey: username
+      passwordKey: password
+  changelog:
+    # -- Path to the changelog file within YOUR chart, e.g.
+    # "liquibase/changelog.xml". Read via `.Files.Get`.
+    file: ""
+    # -- Inline changelog alternative. `file` wins when both are set.
+    content: ""
+    # -- Where the changelog is mounted in the Job container. Its basename is
+    # both the ConfigMap key and the mount subPath, and its directory becomes
+    # LIQUIBASE_SEARCH_PATH — so the default `--changeLogFile=changelog.xml`
+    # keeps resolving if you change this.
+    mountPath: /liquibase/changelog.xml
+  migrations:
+    # -- Globs within YOUR chart, e.g. ["liquibase/migrations/*.sql"]. Read via
+    # `.Files.Glob`; each file's basename becomes its ConfigMap key.
+    paths: []
+    # -- Inline alternative, filename -> content. Merged with `paths`; globbed
+    # files win on key collision. Note the 1 MiB ConfigMap limit, and that
+    # ConfigMap data must be valid UTF-8 text.
+    files: {}
+    mountPath: /liquibase/migrations
+  # -- Job container resources. Falls back to the top-level `resources` when
+  # empty, and is VPA-aware like `jobs[].resources`.
+  resources: {}
+  # -- Extra plain env vars (list of {name, value}), appended after the
+  # composed LIQUIBASE_* variables. Rendered through `tpl`.
+  extraEnvVars: []
+  # -- Extra raw envFrom sources (secretRef/configMapRef). Rendered through
+  # `tpl`, so entries may reference chart helpers.
+  extraEnvFrom: []
+  volumes: []
+  volumeMounts: []
+
+# =============================================================================
 # SIDECARS
 # =============================================================================
 

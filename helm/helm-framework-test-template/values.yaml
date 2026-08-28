@@ -410,6 +410,28 @@ jobs:
         value: migrate
 
 # =============================================================================
+# LIQUIBASE DATABASE MIGRATIONS
+# =============================================================================
+
+# Native Liquibase migration — enabled so `helm template` renders the Job, the
+# changelog/migrations ConfigMaps, the connection Secret, and the wait-for-job
+# init container in the Deployment.
+liquibase:
+  enabled: true
+  database:
+    urlTemplate: "jdbc:sqlserver://{host}:{port};database={name};"
+    host: sql-server
+    port: 1433
+    name: SmokeTestStore
+    userName: sa
+    password: smoke-test-password
+  changelog:
+    file: liquibase/changelog.xml
+  migrations:
+    paths:
+      - liquibase/migrations/*.sql
+
+# =============================================================================
 # SIDECARS
 # =============================================================================
 

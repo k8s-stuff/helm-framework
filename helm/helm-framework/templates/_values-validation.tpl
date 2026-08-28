@@ -133,4 +133,62 @@ virtualService, authorizationPolicy, and podDisruptionBudget.
 {{- end }}
 {{- end }}
 
+{{- if (.Values.liquibase).enabled }}
+{{- $lb := .Values.liquibase -}}
+{{- $db := ($lb.database | default dict) -}}
+{{- $existing := ($db.existingSecret | default dict) -}}
+  {{- if not $db.url }}
+    {{- if not $db.urlTemplate }}
+{{- fail "liquibase.enabled is true but no JDBC URL is configured: set liquibase.database.url to a literal JDBC URL, or set liquibase.database.urlTemplate using the named placeholders {host}, {port} and {name} together with the matching liquibase.database values. The framework ships no per-driver defaults, so one of the two is always required." }}
+    {{- end }}
+    {{- $known := splitList " " (include "helm-framework.liquibase.urlTemplate.placeholders" .) -}}
+    {{- $tmpl := $db.urlTemplate | toString -}}
+    {{- if regexMatch "%[sdvq]" $tmpl }}
+{{- fail (printf "liquibase.database.urlTemplate %q uses a printf verb such as %%s: urlTemplate takes NAMED placeholders instead — {%s}. Positional verbs were removed because a template whose order differed from host, port, name silently produced a valid-looking but wrong URL. Rewrite it, e.g. \"jdbc:sqlserver://{host}:{port};database={name};\"." $tmpl (join "}, {" $known)) }}
+    {{- end }}
+    {{- $used := list -}}
+    {{- range $ph := (regexFindAll "\\{[^}]*\\}" $tmpl -1) }}
+      {{- $bare := $ph | trimPrefix "{" | trimSuffix "}" -}}
+      {{- if not (has $bare $known) }}
+{{- fail (printf "liquibase.database.urlTemplate %q contains unknown placeholder %s: the supported placeholders are {%s}. For anything else, use liquibase.database.url and write the whole JDBC URL yourself (it is rendered through `tpl`, so it can reference any value)." $tmpl $ph (join "}, {" $known)) }}
+      {{- end }}
+      {{- $used = append $used $bare -}}
+    {{- end }}
+    {{- if not $used }}
+{{- fail (printf "liquibase.database.urlTemplate %q contains no placeholders: it would render as a constant, so use liquibase.database.url instead. To substitute values, use {%s}." $tmpl (join "}, {" $known)) }}
+    {{- end }}
+    {{- $missing := list -}}
+    {{- range $ph := $used }}
+      {{- if not (get $db $ph) }}{{- $missing = append $missing (printf "%s (for {%s})" $ph $ph) }}{{- end }}
+    {{- end }}
+    {{- if $missing }}
+{{- fail (printf "liquibase.database.urlTemplate references placeholders whose values are unset: %s. Set them under liquibase.database, or drop the placeholder from the template." (join ", " (uniq $missing))) }}
+    {{- end }}
+  {{- end }}
+  {{- if and (not ($lb.changelog | default dict).file) (not ($lb.changelog | default dict).content) }}
+{{- fail "liquibase.enabled is true but no changelog is configured: set liquibase.changelog.file to a path inside your chart (e.g. \"liquibase/changelog.xml\"), or liquibase.changelog.content to an inline changelog." }}
+  {{- end }}
+  {{- if and $existing.name $db.password }}
+{{- fail "liquibase.database.existingSecret.name and liquibase.database.password are both set: it is ambiguous which credential wins. Unset password to source it from the existing Secret, or unset existingSecret.name to use the generated one." }}
+  {{- end }}
+  {{- with ($lb.changelog | default dict).file }}
+    {{- if not ($.Files.Get .) }}
+{{- fail (printf "liquibase.changelog.file %q resolves to nothing in this chart: .Files.Get returned empty, which would ship an empty changelog ConfigMap and a migration that silently does nothing. Check the path is relative to your chart root and that the file is not excluded by .helmignore." .) }}
+    {{- end }}
+  {{- end }}
+  {{- range $pattern := ($lb.migrations | default dict).paths }}
+    {{- if not ($.Files.Glob $pattern) }}
+{{- fail (printf "liquibase.migrations.paths pattern %q matches no files in this chart: this would ship an empty migrations ConfigMap. Check the glob is relative to your chart root and that the files are not excluded by .helmignore." $pattern) }}
+    {{- end }}
+  {{- end }}
+  {{- $lbName := include "helm-framework.liquibase.name" . -}}
+  {{- range $index, $job := .Values.jobs }}
+    {{- if $job.enabled }}
+      {{- if eq ($job.name | default (printf "job-%d" $index)) $lbName }}
+{{- fail (printf "jobs[%d]'s name %q collides with liquibase.name: both would render a Job named \"<fullname>-%s\". Rename one of them." $index $lbName $lbName) }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+
 {{- end -}}
