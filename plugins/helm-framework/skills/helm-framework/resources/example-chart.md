@@ -450,7 +450,7 @@ jobs:
 liquibase:
   enabled: true
   database:
-    urlTemplate: "jdbc:sqlserver://%s:%s;database=%s;"
+    urlTemplate: "jdbc:sqlserver://{host}:{port};database={name};"
     host: sql-server
     port: 1433
     name: SmokeTestStore

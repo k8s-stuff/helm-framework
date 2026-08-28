@@ -814,24 +814,28 @@ liquibase:
     # or rewrites it. Wins outright when `urlTemplate` is also set. Example:
     # "jdbc:sqlserver://sql-server:1433;database=MyStore;encrypt=false;"
     url: ""
-    # -- Alternative to `url`: a printf template taking exactly three `%s`
-    # verbs, filled with `host`, `port` and `name` in that order. Use it to
-    # keep host/port/name as separate values, so a per-environment overlay can
-    # change just the host. The framework deliberately ships NO per-driver
-    # defaults — you always write the URL shape yourself, which means a new or
-    # renamed driver can never turn into a breaking change here. Examples:
-    #   SQL Server: "jdbc:sqlserver://%s:%s;database=%s;"
-    #   PostgreSQL: "jdbc:postgresql://%s:%s/%s"
-    #   MySQL:      "jdbc:mysql://%s:%s/%s"
-    #   Oracle:     "jdbc:oracle:thin:@%s:%s/%s"
-    # For a URL that does not fit three substitutions, use `url` instead.
+    # -- Alternative to `url`: a URL template using the NAMED placeholders
+    # `{host}`, `{port}` and `{name}`. Use it to keep host/port/name as separate
+    # values, so a per-environment overlay can change just the host. Each
+    # placeholder is optional — use only the ones your driver's URL needs — but
+    # any you do use must have a value set below. The framework deliberately
+    # ships NO per-driver defaults, so a new or renamed driver can never turn
+    # into a breaking change here. Examples:
+    #   SQL Server: "jdbc:sqlserver://{host}:{port};database={name};"
+    #   PostgreSQL: "jdbc:postgresql://{host}:{port}/{name}"
+    #   MySQL:      "jdbc:mysql://{host}:{port}/{name}"
+    #   Oracle:     "jdbc:oracle:thin:@{host}:{port}/{name}"
+    # Placeholders are named, not positional: printf-style `%s` verbs are
+    # rejected, because a template whose verb order differed from host, port,
+    # name silently produced a valid-looking but wrong URL. For anything these
+    # three cannot express, use `url` instead.
     urlTemplate: ""
-    # -- Database host. Required when `urlTemplate` is used.
+    # -- Database host. Required when `urlTemplate` uses `{host}`.
     host: ""
-    # -- Database port. Required when `urlTemplate` is used; there is no
+    # -- Database port. Required when `urlTemplate` uses `{port}`; there is no
     # default, since the framework does not know your driver.
     port: 0
-    # -- Database name. Required when `urlTemplate` is used.
+    # -- Database name. Required when `urlTemplate` uses `{name}`.
     name: ""
     userName: ""
     password: ""

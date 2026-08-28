@@ -139,17 +139,30 @@ virtualService, authorizationPolicy, and podDisruptionBudget.
 {{- $existing := ($db.existingSecret | default dict) -}}
   {{- if not $db.url }}
     {{- if not $db.urlTemplate }}
-{{- fail "liquibase.enabled is true but no JDBC URL is configured: set liquibase.database.url to a literal JDBC URL, or set liquibase.database.urlTemplate (a printf template taking host, port, name) together with liquibase.database.host, .port and .name. The framework ships no per-driver defaults, so one of the two is always required." }}
+{{- fail "liquibase.enabled is true but no JDBC URL is configured: set liquibase.database.url to a literal JDBC URL, or set liquibase.database.urlTemplate using the named placeholders {host}, {port} and {name} together with the matching liquibase.database values. The framework ships no per-driver defaults, so one of the two is always required." }}
+    {{- end }}
+    {{- $known := splitList " " (include "helm-framework.liquibase.urlTemplate.placeholders" .) -}}
+    {{- $tmpl := $db.urlTemplate | toString -}}
+    {{- if regexMatch "%[sdvq]" $tmpl }}
+{{- fail (printf "liquibase.database.urlTemplate %q uses a printf verb such as %%s: urlTemplate takes NAMED placeholders instead — {%s}. Positional verbs were removed because a template whose order differed from host, port, name silently produced a valid-looking but wrong URL. Rewrite it, e.g. \"jdbc:sqlserver://{host}:{port};database={name};\"." $tmpl (join "}, {" $known)) }}
+    {{- end }}
+    {{- $used := list -}}
+    {{- range $ph := (regexFindAll "\\{[^}]*\\}" $tmpl -1) }}
+      {{- $bare := $ph | trimPrefix "{" | trimSuffix "}" -}}
+      {{- if not (has $bare $known) }}
+{{- fail (printf "liquibase.database.urlTemplate %q contains unknown placeholder %s: the supported placeholders are {%s}. For anything else, use liquibase.database.url and write the whole JDBC URL yourself (it is rendered through `tpl`, so it can reference any value)." $tmpl $ph (join "}, {" $known)) }}
+      {{- end }}
+      {{- $used = append $used $bare -}}
+    {{- end }}
+    {{- if not $used }}
+{{- fail (printf "liquibase.database.urlTemplate %q contains no placeholders: it would render as a constant, so use liquibase.database.url instead. To substitute values, use {%s}." $tmpl (join "}, {" $known)) }}
     {{- end }}
     {{- $missing := list -}}
-    {{- if not $db.host }}{{- $missing = append $missing "host" }}{{- end }}
-    {{- if not $db.port }}{{- $missing = append $missing "port" }}{{- end }}
-    {{- if not $db.name }}{{- $missing = append $missing "name" }}{{- end }}
-    {{- if $missing }}
-{{- fail (printf "liquibase.database.urlTemplate is set but %s %s unset: the template's three %%s verbs are filled with host, port and name in that order, so all three are required. Set them, or switch to liquibase.database.url and write the whole JDBC URL yourself." (join ", " $missing) (ternary "is" "are" (eq (len $missing) 1))) }}
+    {{- range $ph := $used }}
+      {{- if not (get $db $ph) }}{{- $missing = append $missing (printf "%s (for {%s})" $ph $ph) }}{{- end }}
     {{- end }}
-    {{- if ne (len (regexFindAll "%s" $db.urlTemplate -1)) 3 }}
-{{- fail (printf "liquibase.database.urlTemplate %q does not contain exactly three %%s verbs (found %d): it is filled with host, port and name in that order. For a URL that does not fit that shape, use liquibase.database.url instead and write it out in full." $db.urlTemplate (len (regexFindAll "%s" $db.urlTemplate -1))) }}
+    {{- if $missing }}
+{{- fail (printf "liquibase.database.urlTemplate references placeholders whose values are unset: %s. Set them under liquibase.database, or drop the placeholder from the template." (join ", " (uniq $missing))) }}
     {{- end }}
   {{- end }}
   {{- if and (not ($lb.changelog | default dict).file) (not ($lb.changelog | default dict).content) }}

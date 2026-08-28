@@ -325,10 +325,16 @@ or renaming a driver is never a breaking change here:
                         reference other values. Total control: any driver, any
                         vendor-specific parameter, credentials embedded if the
                         driver demands it.
-  database.urlTemplate  a printf template taking exactly three `%s` verbs, in
-                        the order host, port, name. Keeps host/port/name as
-                        separate values so a per-environment overlay can change
-                        just the host.
+  database.urlTemplate  a template with NAMED placeholders `{host}`, `{port}`
+                        and `{name}`. Keeps host/port/name as separate values
+                        so a per-environment overlay can change just the host.
+
+Placeholders are named rather than positional on purpose. An earlier revision
+used printf `%s` verbs, which are filled in argument order: a template written
+`jdbc://%s/%s:%s` meaning name/host/port silently received host/port/name,
+producing a syntactically valid URL that only failed when the migration tried
+to connect. Named placeholders cannot be mis-ordered, and each is optional —
+use only the ones your driver's URL actually needs.
 
 `url` wins when both are set.
 */}}
@@ -337,8 +343,22 @@ or renaming a driver is never a breaking change here:
 {{- if $db.url -}}
 {{- tpl $db.url . -}}
 {{- else -}}
-{{- printf ($db.urlTemplate | toString) ($db.host | toString) ($db.port | toString) ($db.name | toString) -}}
+{{- $url := $db.urlTemplate | toString -}}
+{{- $url = $url | replace "{host}" ($db.host | toString) -}}
+{{- $url = $url | replace "{port}" ($db.port | toString) -}}
+{{- $url = $url | replace "{name}" ($db.name | toString) -}}
+{{- $url -}}
 {{- end -}}
+{{- end }}
+
+{{/*
+The placeholder names `database.urlTemplate` understands. Single source of
+truth shared by the URL composer above and the validation in
+_values-validation.tpl, so an added placeholder cannot be accepted by one and
+rejected by the other.
+*/}}
+{{- define "helm-framework.liquibase.urlTemplate.placeholders" -}}
+host port name
 {{- end }}
 
 {{/*

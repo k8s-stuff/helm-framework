@@ -129,7 +129,7 @@ always writes the URL shape, one of two ways:
 | Value | Shape | When |
 |---|---|---|
 | `database.url` | a literal JDBC URL, `tpl`-rendered | any driver, any vendor-specific parameter; the framework never parses or rewrites it |
-| `database.urlTemplate` | `printf` with exactly three `%s`: host, port, name | keeps host/port/name as separate values, so a per-environment overlay can change just the host |
+| `database.urlTemplate` | named placeholders `{host}`, `{port}`, `{name}` | keeps host/port/name as separate values, so a per-environment overlay can change just the host |
 
 `url` wins when both are set. Neither has a default, so one is always
 required — enforced by validation rather than guessed.
@@ -138,17 +138,53 @@ Common templates, documented in `values.yaml` as examples rather than
 implemented as code:
 
 ```
-SQL Server: jdbc:sqlserver://%s:%s;database=%s;
-PostgreSQL: jdbc:postgresql://%s:%s/%s
-MySQL:      jdbc:mysql://%s:%s/%s
-Oracle:     jdbc:oracle:thin:@%s:%s/%s
+SQL Server: jdbc:sqlserver://{host}:{port};database={name};
+PostgreSQL: jdbc:postgresql://{host}:{port}/{name}
+MySQL:      jdbc:mysql://{host}:{port}/{name}
+Oracle:     jdbc:oracle:thin:@{host}:{port}/{name}
 ```
 
 Note that the SQL Server example omits `encrypt=false`: a chart that needs
 transport encryption relaxed writes it into its own `urlTemplate`, where it is
-visible in that chart's values and in review. Charts migrating from a
-hand-rolled `connectionStringTemplate` carrying `encrypt=false;` carry it
-across verbatim — the printf shape is identical, so the migration is a rename.
+visible in that chart's values and in review.
+
+### Why the placeholders are named, not positional
+
+**Revised during PR review (#9).** `urlTemplate` was first specified as a
+`printf` template taking three `%s` verbs filled with host, port, name in that
+order, and validation checked that exactly three verbs were present. A reviewer
+pointed out the hole: verb *count* is checkable, verb *meaning* is not. A
+template written `jdbc:custom:%s@%s:%s` intending name/host/port receives
+host/port/name, yielding `jdbc:custom:sql-server@1433/MyStore` — a
+syntactically valid URL that renders cleanly, passes validation, and fails only
+when Liquibase tries to connect. Exactly the silent-failure class the rest of
+this design goes out of its way to catch at render time.
+
+Named placeholders cannot be mis-ordered, and they compose better: each is
+independently optional, so a driver URL needing only host and port simply omits
+`{name}`. Substitution is `replace`, not `printf`.
+
+The cost is that charts migrating from a hand-rolled printf
+`connectionStringTemplate` must rewrite `%s` into named placeholders rather
+than renaming the key. Validation makes that a render-time error with the
+rewrite spelled out, rather than a wrong URL: a `%s`, `%d`, `%v` or `%q` verb
+anywhere in `urlTemplate` is rejected outright.
+
+Full `urlTemplate` validation:
+
+- printf verbs (`%s`/`%d`/`%v`/`%q`) rejected, with the named-placeholder
+  rewrite shown.
+- Unknown placeholders rejected — `{database}` and `{dbname}` are the obvious
+  near-misses — listing the supported set and pointing at `database.url` for
+  anything else.
+- A template with no placeholders at all rejected: it would render as a
+  constant, so `database.url` is the right home for it.
+- Every placeholder actually used must have its value set; the message names
+  which. Placeholders *not* used impose no requirement.
+
+The supported placeholder names live in one helper,
+`helm-framework.liquibase.urlTemplate.placeholders`, read by both the URL
+composer and the validation, so the two cannot disagree about what is legal.
 
 ### Composed environment
 
@@ -275,15 +311,12 @@ when `liquibase.enabled`.
    defaults, one of the two is always required.
 2. Neither `changelog.file` nor `changelog.content` set — there is nothing to
    migrate from.
-3. `database.urlTemplate` set but `host`, `port`, or `name` missing. The
-   message names exactly which of the three are unset, since `printf` would
-   otherwise happily substitute empty strings into a syntactically valid but
-   unusable URL.
-4. `database.urlTemplate` set but not containing exactly three `%s` verbs.
-   Too few and `printf` appends `%!(EXTRA string=…)` to the URL; too many and
-   it emits `%!s(MISSING)`. Either way the migration fails at connect time
-   with a confusing driver error, so it is caught at render time and the
-   message points at `database.url` as the way out.
+3. `database.urlTemplate` uses a placeholder whose value is unset. The message
+   names which, since substitution would otherwise put empty strings into a
+   syntactically valid but unusable URL.
+4. `database.urlTemplate` is malformed — a printf verb, an unknown
+   placeholder, or no placeholders at all. See "Why the placeholders are
+   named, not positional" above for each case.
 5. `database.existingSecret.name` set together with a non-empty
    `database.password` — ambiguous about which wins.
 6. `changelog.file` set but `.Files.Get` returns empty — a typo'd path would
