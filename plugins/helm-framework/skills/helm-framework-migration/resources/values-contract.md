@@ -193,7 +193,6 @@ not for authorizing deletion.
 - `liquibase.changelog.mountPath`
 - `liquibase.command`
 - `liquibase.database`
-- `liquibase.database.engine`
 - `liquibase.database.existingSecret`
 - `liquibase.database.existingSecret.name`
 - `liquibase.database.existingSecret.passwordKey`

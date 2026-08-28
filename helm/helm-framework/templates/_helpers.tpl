@@ -317,16 +317,27 @@ self-contained changelog needs none of them.
 {{- end }}
 
 {{/*
-The composed JDBC URL. `database.url` wins outright and is tpl-rendered so it
-can reference other values; otherwise the engine (or overridden) printf
-template is filled with host, resolved port, and database name.
+The JDBC URL. Two mutually exclusive ways to supply it, both fully in the
+chart author's hands — the framework ships no per-engine defaults, so adding
+or renaming a driver is never a breaking change here:
+
+  database.url          a literal JDBC URL, rendered through `tpl` so it can
+                        reference other values. Total control: any driver, any
+                        vendor-specific parameter, credentials embedded if the
+                        driver demands it.
+  database.urlTemplate  a printf template taking exactly three `%s` verbs, in
+                        the order host, port, name. Keeps host/port/name as
+                        separate values so a per-environment overlay can change
+                        just the host.
+
+`url` wins when both are set.
 */}}
 {{- define "helm-framework.liquibase.url" -}}
 {{- $db := ((.Values.liquibase).database | default dict) -}}
 {{- if $db.url -}}
 {{- tpl $db.url . -}}
 {{- else -}}
-{{- printf (include "helm-framework.values.liquibase.urlTemplate" .) ($db.host | toString) (include "helm-framework.values.liquibase.port" .) ($db.name | toString) -}}
+{{- printf ($db.urlTemplate | toString) ($db.host | toString) ($db.port | toString) ($db.name | toString) -}}
 {{- end -}}
 {{- end }}
 

@@ -808,28 +808,33 @@ liquibase:
     # INFO, FINE, or OFF.
     level: INFO
   database:
-    # -- One of `sqlserver`, `postgresql`, `mysql`, or `oracle`. Selects the
-    # default port and the built-in JDBC URL template. An unrecognised engine is
-    # allowed only together with an explicit `urlTemplate` AND an explicit
-    # `port`.
-    engine: sqlserver
-    # -- Database host. Required unless `url` is set.
+    # -- Literal JDBC URL, rendered through `tpl` so it can reference other
+    # values. The most direct option and the one to reach for when the
+    # connection needs vendor-specific parameters: the framework never parses
+    # or rewrites it. Wins outright when `urlTemplate` is also set. Example:
+    # "jdbc:sqlserver://sql-server:1433;database=MyStore;encrypt=false;"
+    url: ""
+    # -- Alternative to `url`: a printf template taking exactly three `%s`
+    # verbs, filled with `host`, `port` and `name` in that order. Use it to
+    # keep host/port/name as separate values, so a per-environment overlay can
+    # change just the host. The framework deliberately ships NO per-driver
+    # defaults — you always write the URL shape yourself, which means a new or
+    # renamed driver can never turn into a breaking change here. Examples:
+    #   SQL Server: "jdbc:sqlserver://%s:%s;database=%s;"
+    #   PostgreSQL: "jdbc:postgresql://%s:%s/%s"
+    #   MySQL:      "jdbc:mysql://%s:%s/%s"
+    #   Oracle:     "jdbc:oracle:thin:@%s:%s/%s"
+    # For a URL that does not fit three substitutions, use `url` instead.
+    urlTemplate: ""
+    # -- Database host. Required when `urlTemplate` is used.
     host: ""
-    # -- 0 selects the engine default: sqlserver 1433, postgresql 5432,
-    # mysql 3306, oracle 1521.
+    # -- Database port. Required when `urlTemplate` is used; there is no
+    # default, since the framework does not know your driver.
     port: 0
-    # -- Database name. Required unless `url` is set.
+    # -- Database name. Required when `urlTemplate` is used.
     name: ""
     userName: ""
     password: ""
-    # -- printf override for the JDBC URL template; arguments are host, port,
-    # and name in that order. The built-in sqlserver template deliberately
-    # omits `encrypt=false` — set it here if your server needs it, e.g.
-    # "jdbc:sqlserver://%s:%s;database=%s;encrypt=false;".
-    urlTemplate: ""
-    # -- Literal JDBC URL, rendered through `tpl`. Bypasses composition
-    # entirely; host, port, name, and urlTemplate are then ignored.
-    url: ""
     # -- Source credentials from an existing Secret instead of `userName` and
     # `password`. When `name` is set, no connection Secret is generated and the
     # username/password come from secretKeyRef — use this with ExternalSecret

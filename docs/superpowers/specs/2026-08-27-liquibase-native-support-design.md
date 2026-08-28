@@ -44,8 +44,9 @@ today.
 
 - Tool neutrality. This is deliberately Liquibase-specific; a
   `dbMigration.tool` abstraction was considered and rejected as premature.
-- Framework knowledge of per-engine JDBC option syntax. The framework
-  composes a URL from a printf template and stops there.
+- Framework knowledge of any JDBC driver: no engine list, no default ports, no
+  built-in URL templates. The chart author supplies the URL or its printf
+  shape, and the framework substitutes and stops there.
 - Rollback, diff, or any Liquibase command beyond what `command`/`args`
   expose.
 
@@ -78,14 +79,13 @@ liquibase:
   log:
     level: INFO               # SEVERE WARNING INFO FINE OFF
   database:
-    engine: sqlserver         # sqlserver | postgresql | mysql | oracle
-    host: ""                  # required unless `url` is set
-    port: 0                   # 0 selects the engine default
-    name: ""                  # required unless `url` is set
+    url: ""                   # literal JDBC URL, tpl-rendered; wins over urlTemplate
+    urlTemplate: ""           # printf, exactly three %s: host, port, name
+    host: ""                  # required when urlTemplate is used
+    port: 0                   # required when urlTemplate is used; no default
+    name: ""                  # required when urlTemplate is used
     userName: ""
     password: ""
-    urlTemplate: ""           # printf override; args are host, port, name
-    url: ""                   # literal override, tpl-rendered; skips composition
     existingSecret:
       name: ""                # when set, credentials come from secretKeyRef
       usernameKey: username
@@ -105,25 +105,50 @@ liquibase:
   volumeMounts: []
 ```
 
-### Engine defaults
+### No per-engine defaults
 
-| engine | default port | default urlTemplate |
+**Revised during PR review (#9).** An earlier revision of this design had a
+`database.engine` enum (`sqlserver` / `postgresql` / `mysql` / `oracle`)
+selecting a default port and a built-in JDBC URL template. That is removed.
+Two objections, both sound:
+
+- A closed enum in a library chart's public API is a liability. Every driver
+  the framework does not list is a chart that cannot express itself without an
+  escape hatch, and adding, renaming, or correcting an entry later is a
+  behaviour change for every chart pinned to it — a breaking change dressed up
+  as a default.
+- Baked-in URL templates hide the connection string from the chart author.
+  Real deployments carry vendor-specific parameters (`encrypt`,
+  `trustServerCertificate`, `oracle.net.ssl_server_dn_match`, connection-pool
+  and timeout options); a fixed three-substitution template silently cannot
+  express them, and the failure shows up at migration time, not render time.
+
+The framework therefore ships **no** knowledge of any driver. The chart author
+always writes the URL shape, one of two ways:
+
+| Value | Shape | When |
 |---|---|---|
-| `sqlserver` | 1433 | `jdbc:sqlserver://%s:%s;database=%s;` |
-| `postgresql` | 5432 | `jdbc:postgresql://%s:%s/%s` |
-| `mysql` | 3306 | `jdbc:mysql://%s:%s/%s` |
-| `oracle` | 1521 | `jdbc:oracle:thin:@%s:%s/%s` |
+| `database.url` | a literal JDBC URL, `tpl`-rendered | any driver, any vendor-specific parameter; the framework never parses or rewrites it |
+| `database.urlTemplate` | `printf` with exactly three `%s`: host, port, name | keeps host/port/name as separate values, so a per-environment overlay can change just the host |
 
-The `sqlserver` template deliberately omits `encrypt=false`. The MSSQL
-driver's own default applies; a chart that needs transport encryption
-relaxed sets `database.urlTemplate` explicitly, so the choice is visible in
-that chart's values and in review rather than inherited invisibly. Charts
-migrating from a hand-rolled `connectionStringTemplate` that carried
-`encrypt=false;` must carry it over as `database.urlTemplate`.
+`url` wins when both are set. Neither has a default, so one is always
+required — enforced by validation rather than guessed.
 
-Resolution order for the URL: `database.url` (tpl-rendered) wins outright;
-otherwise `database.urlTemplate` or the engine default is filled via
-`printf` with host, resolved port, and name.
+Common templates, documented in `values.yaml` as examples rather than
+implemented as code:
+
+```
+SQL Server: jdbc:sqlserver://%s:%s;database=%s;
+PostgreSQL: jdbc:postgresql://%s:%s/%s
+MySQL:      jdbc:mysql://%s:%s/%s
+Oracle:     jdbc:oracle:thin:@%s:%s/%s
+```
+
+Note that the SQL Server example omits `encrypt=false`: a chart that needs
+transport encryption relaxed writes it into its own `urlTemplate`, where it is
+visible in that chart's values and in review. Charts migrating from a
+hand-rolled `connectionStringTemplate` carrying `encrypt=false;` carry it
+across verbatim — the printf shape is identical, so the migration is a rename.
 
 ### Composed environment
 
@@ -191,10 +216,10 @@ definition of every generated name:
 | `helm-framework.liquibase.url` | the composed JDBC URL |
 | `helm-framework.liquibase.env` | the full `env:` list |
 
-The engine port and urlTemplate lookup tables live in `_values.tpl` as
-`helm-framework.values.liquibase.port` and
-`helm-framework.values.liquibase.urlTemplate`, following that file's
-existing role as the defaults layer.
+`_values.tpl` gains nothing for Liquibase. That file is the per-value defaults
+layer, and with the engine enum removed there are no Liquibase defaults left to
+host there — `helm-framework.liquibase.url` reads `database.url` /
+`database.urlTemplate` directly.
 
 ## Refactor: shared Job partials
 
@@ -246,24 +271,27 @@ Added to `helm-framework.values.validate` in `_values-validation.tpl`,
 following that file's existing `fail (printf ...)` style. All only apply
 when `liquibase.enabled`.
 
-1. Neither `database.url` nor both of `database.host` and `database.name`
-   set.
+1. Neither `database.url` nor `database.urlTemplate` set — with no per-driver
+   defaults, one of the two is always required.
 2. Neither `changelog.file` nor `changelog.content` set — there is nothing to
    migrate from.
-3. `database.engine` not in the supported set, when no `database.urlTemplate`
-   or `database.url` is given. The message lists the supported engines.
-   An unrecognised `engine` combined with an explicit `database.urlTemplate`
-   is allowed — that is the escape hatch for an unsupported driver — but
-   then `database.port` must be set explicitly, since there is no engine
-   default to fall back on. Validate that too.
-4. `database.existingSecret.name` set together with a non-empty
+3. `database.urlTemplate` set but `host`, `port`, or `name` missing. The
+   message names exactly which of the three are unset, since `printf` would
+   otherwise happily substitute empty strings into a syntactically valid but
+   unusable URL.
+4. `database.urlTemplate` set but not containing exactly three `%s` verbs.
+   Too few and `printf` appends `%!(EXTRA string=…)` to the URL; too many and
+   it emits `%!s(MISSING)`. Either way the migration fails at connect time
+   with a confusing driver error, so it is caught at render time and the
+   message points at `database.url` as the way out.
+5. `database.existingSecret.name` set together with a non-empty
    `database.password` — ambiguous about which wins.
-5. `changelog.file` set but `.Files.Get` returns empty — a typo'd path would
+6. `changelog.file` set but `.Files.Get` returns empty — a typo'd path would
    otherwise ship a silently empty ConfigMap and a migration that does
    nothing.
-6. `migrations.paths` non-empty but `.Files.Glob` matches zero files — same
+7. `migrations.paths` non-empty but `.Files.Glob` matches zero files — same
    silent-success failure mode.
-7. `liquibase.name` collides with the name of an enabled `jobs[]` entry —
+8. `liquibase.name` collides with the name of an enabled `jobs[]` entry —
    both would render the same Job name.
 
 Not validated, documented instead: the 1 MiB ConfigMap size limit, and that

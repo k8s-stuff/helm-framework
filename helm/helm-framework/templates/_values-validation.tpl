@@ -137,19 +137,23 @@ virtualService, authorizationPolicy, and podDisruptionBudget.
 {{- $lb := .Values.liquibase -}}
 {{- $db := ($lb.database | default dict) -}}
 {{- $existing := ($db.existingSecret | default dict) -}}
-{{- $engines := list "sqlserver" "postgresql" "mysql" "oracle" -}}
-{{- $customUrl := or $db.url $db.urlTemplate -}}
-  {{- if and (not $db.url) (or (not $db.host) (not $db.name)) }}
-{{- fail "liquibase.enabled is true but the database is not addressable: set liquibase.database.host and liquibase.database.name, or set liquibase.database.url to a literal JDBC URL." }}
+  {{- if not $db.url }}
+    {{- if not $db.urlTemplate }}
+{{- fail "liquibase.enabled is true but no JDBC URL is configured: set liquibase.database.url to a literal JDBC URL, or set liquibase.database.urlTemplate (a printf template taking host, port, name) together with liquibase.database.host, .port and .name. The framework ships no per-driver defaults, so one of the two is always required." }}
+    {{- end }}
+    {{- $missing := list -}}
+    {{- if not $db.host }}{{- $missing = append $missing "host" }}{{- end }}
+    {{- if not $db.port }}{{- $missing = append $missing "port" }}{{- end }}
+    {{- if not $db.name }}{{- $missing = append $missing "name" }}{{- end }}
+    {{- if $missing }}
+{{- fail (printf "liquibase.database.urlTemplate is set but %s %s unset: the template's three %%s verbs are filled with host, port and name in that order, so all three are required. Set them, or switch to liquibase.database.url and write the whole JDBC URL yourself." (join ", " $missing) (ternary "is" "are" (eq (len $missing) 1))) }}
+    {{- end }}
+    {{- if ne (len (regexFindAll "%s" $db.urlTemplate -1)) 3 }}
+{{- fail (printf "liquibase.database.urlTemplate %q does not contain exactly three %%s verbs (found %d): it is filled with host, port and name in that order. For a URL that does not fit that shape, use liquibase.database.url instead and write it out in full." $db.urlTemplate (len (regexFindAll "%s" $db.urlTemplate -1))) }}
+    {{- end }}
   {{- end }}
   {{- if and (not ($lb.changelog | default dict).file) (not ($lb.changelog | default dict).content) }}
 {{- fail "liquibase.enabled is true but no changelog is configured: set liquibase.changelog.file to a path inside your chart (e.g. \"liquibase/changelog.xml\"), or liquibase.changelog.content to an inline changelog." }}
-  {{- end }}
-  {{- if and (not $customUrl) (not (has ($db.engine | default "sqlserver") $engines)) }}
-{{- fail (printf "liquibase.database.engine %q is not one of %s: pick a supported engine, or set liquibase.database.urlTemplate (and liquibase.database.port) to drive an unsupported driver yourself." ($db.engine | default "sqlserver") (join ", " $engines)) }}
-  {{- end }}
-  {{- if and (not (has ($db.engine | default "sqlserver") $engines)) (not $db.url) (not $db.port) }}
-{{- fail (printf "liquibase.database.engine %q is unrecognised and liquibase.database.port is unset: there is no engine default to fall back on, so set the port explicitly." ($db.engine | default "sqlserver")) }}
   {{- end }}
   {{- if and $existing.name $db.password }}
 {{- fail "liquibase.database.existingSecret.name and liquibase.database.password are both set: it is ambiguous which credential wins. Unset password to source it from the existing Secret, or unset existingSecret.name to use the generated one." }}

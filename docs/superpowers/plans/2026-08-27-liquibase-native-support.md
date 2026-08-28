@@ -10,6 +10,12 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-27-liquibase-native-support-design.md`
 
+> **Superseded in part.** This plan was executed as written, then PR review
+> (#9) removed the `database.engine` enum and its per-driver port and
+> URL-template defaults. Tasks 3 and 6 below still describe them. The spec is
+> the current design — see its "No per-engine defaults" section. Everything
+> else in this plan matches what shipped.
+
 ## Global Constraints
 
 - Every new template lives in `helm/helm-framework/templates/` and is a `define` registered in `_deployment-global.tpl`'s `$documents` list. The library chart renders nothing on its own.
