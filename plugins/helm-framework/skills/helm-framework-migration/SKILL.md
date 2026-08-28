@@ -8,7 +8,7 @@ description: "Migrate an existing hand-rolled Helm chart onto the helm-framework
 ## What this skill does
 
 Guides migrating an existing chart's hand-rolled templates onto
-`helm-framework` (v1.2.1 at generation time) safely. This is a distinct,
+`helm-framework` (v1.3.0 at generation time) safely. This is a distinct,
 harder job from scaffolding a new chart (see the `helm-framework` skill for
 that): `helm-framework` reads the consumer's flat `.Values` directly, with no
 `additionalProperties: false` enforcement, so a value nothing reads after
