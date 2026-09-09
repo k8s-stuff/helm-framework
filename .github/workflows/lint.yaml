@@ -206,3 +206,91 @@ jobs:
             echo "::error::Expected the Job's username and password to both reference external-db-credentials (2 secretKeyRefs) but found $ref_count. See helm-framework.liquibase.env in _helpers.tpl."
             exit 1
           fi
+
+      # envVars accepts a list of {name, value} or a map of NAME: value. The map
+      # form exists for one reason: Helm replaces lists wholesale when merging
+      # values files, so a deployment-time overlay adding HTTPS_PROXY used to
+      # silently drop every variable the chart itself set. Maps merge key by key
+      # instead. Assert that merge actually happens - inherit, add, override -
+      # and that the list form (the only shape that can carry valueFrom) is
+      # untouched by the normalizer.
+      - name: "Regression test - map-form envVars must merge across values files, not replace"
+        working-directory: helm/helm-framework-test-template
+        run: |
+          set -eu
+
+          cat > /tmp/base-env.yaml <<'EOF'
+          envVars:
+            ASPNETCORE_ENVIRONMENT: "Production"
+            TZ: "Europe/Stockholm"
+          EOF
+          cat > /tmp/overlay-env.yaml <<'EOF'
+          envVars:
+            HTTPS_PROXY: "webproxy.example:3128"
+            TZ: "UTC"
+          EOF
+
+          rendered_env=$(helm template helm-framework-test-template . \
+            -f /tmp/base-env.yaml -f /tmp/overlay-env.yaml)
+          echo "$rendered_env"
+
+          # Scope the assertions to the main container, so a match inside a
+          # sidecar or Job cannot stand in for the container under test.
+          main_env=$(echo "$rendered_env" | awk '/- name: helm-framework-test-template$/,/volumeMounts:/')
+
+          for expected in 'name: ASPNETCORE_ENVIRONMENT' 'name: HTTPS_PROXY' 'value: UTC'; do
+            if ! echo "$main_env" | grep -q "$expected"; then
+              echo "::error::Expected '$expected' in the main container env after merging two map-form envVars files, but it is missing. The second -f file replaced the first instead of merging - see helm-framework.envVars.list in _helpers.tpl."
+              exit 1
+            fi
+          done
+
+          if echo "$main_env" | grep -q 'Europe/Stockholm'; then
+            echo "::error::The overlay set TZ=UTC but the base value Europe/Stockholm survived. Map-form envVars must let a later values file override a key."
+            exit 1
+          fi
+
+          # Non-string map values must be coerced: a container env value is a
+          # string, and `PORT: 8080` is the obvious thing for a user to write.
+          cat > /tmp/coerce-env.yaml <<'EOF'
+          envVars:
+            PORT: 8080
+            DEBUG: true
+          EOF
+          coerced=$(helm template helm-framework-test-template . -f /tmp/coerce-env.yaml)
+          for expected in 'value: "8080"' 'value: "true"'; do
+            if ! echo "$coerced" | grep -q -- "$expected"; then
+              echo "::error::Expected a coerced string $expected from map-form envVars, but it is missing. Non-string map values must be rendered as strings - see the toString in helm-framework.envVars.list."
+              exit 1
+            fi
+          done
+
+          # The list form is the only shape that can express valueFrom, so the
+          # normalizer must pass it through untouched rather than flattening it.
+          cat > /tmp/valuefrom-env.yaml <<'EOF'
+          envVars:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          EOF
+          vf=$(helm template helm-framework-test-template . -f /tmp/valuefrom-env.yaml)
+          if ! echo "$vf" | grep -q 'fieldPath: status.podIP'; then
+            echo "::error::List-form envVars lost its valueFrom block. helm-framework.envVars.list must pass the list shape through unmodified."
+            exit 1
+          fi
+
+          # A map value that is not a scalar is almost always someone reaching
+          # for valueFrom under the map form; it must fail with a clear message
+          # rather than rendering a nested structure under `value:`.
+          cat > /tmp/bad-env.yaml <<'EOF'
+          envVars:
+            POD_IP:
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          EOF
+          if helm template helm-framework-test-template . -f /tmp/bad-env.yaml >/dev/null 2>&1; then
+            echo "::error::A map-form envVars entry with a non-scalar value rendered successfully. It must fail validation - see the envVars shape check in _values-validation.tpl."
+            exit 1
+          fi

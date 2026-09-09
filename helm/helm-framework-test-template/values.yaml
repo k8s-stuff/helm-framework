@@ -405,9 +405,11 @@ jobs:
     args: ["echo running migrations"]
     restartPolicy: OnFailure
     backoffLimit: 6
+    # Map form of envVars, exercised here so the default render covers both
+    # accepted shapes at once (the top-level key below stays in list form).
     envVars:
-      - name: JOB_MODE
-        value: migrate
+      JOB_MODE: migrate
+      JOB_ATTEMPT: 1
 
 # =============================================================================
 # LIQUIBASE DATABASE MIGRATIONS
@@ -452,11 +454,11 @@ sidecars:
       proxySetting: "proxyValue"
     # Sidecar-owned env: `foo` overrides the release-wide envVars entry, `PROXY_MODE`
     # is sidecar-only, and `secretKey` overrides the release-wide envVarsFromSecret key.
+    # Written in map form against a list-form release-wide envVars, so the render
+    # covers helm-framework.sidecar.env merging the two shapes together.
     envVars:
-      - name: foo
-        value: sidecar-bar
-      - name: PROXY_MODE
-        value: transparent
+      foo: sidecar-bar
+      PROXY_MODE: transparent
     envVarsFromSecret:
       secretKey: sidecarSecretValue
       proxySecret: proxySecretValue
