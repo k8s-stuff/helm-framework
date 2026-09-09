@@ -221,7 +221,7 @@ jobs:
 
           cat > /tmp/base-env.yaml <<'EOF'
           envVars:
-            ASPNETCORE_ENVIRONMENT: "Production"
+            APP_ENV: "production"
             TZ: "Europe/Stockholm"
           EOF
           cat > /tmp/overlay-env.yaml <<'EOF'
@@ -238,7 +238,7 @@ jobs:
           # sidecar or Job cannot stand in for the container under test.
           main_env=$(echo "$rendered_env" | awk '/- name: helm-framework-test-template$/,/volumeMounts:/')
 
-          for expected in 'name: ASPNETCORE_ENVIRONMENT' 'name: HTTPS_PROXY' 'value: UTC'; do
+          for expected in 'name: APP_ENV' 'name: HTTPS_PROXY' 'value: UTC'; do
             if ! echo "$main_env" | grep -q "$expected"; then
               echo "::error::Expected '$expected' in the main container env after merging two map-form envVars files, but it is missing. The second -f file replaced the first instead of merging - see helm-framework.envVars.list in _helpers.tpl."
               exit 1
