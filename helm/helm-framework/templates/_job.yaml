@@ -61,13 +61,15 @@ spec:
             {{- toYaml $job.command | nindent 12 }}
           {{- end }}
 
-          {{- if or $root.Values.envVars $job.envVars }}
+          {{- $rootEnv := include "helm-framework.envVars.list" $root.Values.envVars }}
+          {{- $jobEnv := include "helm-framework.envVars.list" $job.envVars }}
+          {{- if or $rootEnv $jobEnv }}
           env:
-            {{- with $root.Values.envVars }}
-            {{- toYaml . | nindent 12 }}
+            {{- with $rootEnv }}
+            {{- . | nindent 12 }}
             {{- end }}
-            {{- with $job.envVars }}
-            {{- tpl (toYaml .) $root | nindent 12 }}
+            {{- with $jobEnv }}
+            {{- tpl . $root | nindent 12 }}
             {{- end }}
           {{- end }}
           {{- if or $root.Values.envVarsFromSecret $job.envFrom }}

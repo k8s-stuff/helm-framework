@@ -6,6 +6,27 @@ virtualService, authorizationPolicy, and podDisruptionBudget.
 */}}
 
 {{- define "helm-framework.values.validate" -}}
+{{- /* envVars accepts a list of {name, value} or a map of NAME: value. Only the
+list form can carry `valueFrom`, so a map entry whose value is itself a map or a
+list is almost always someone reaching for valueFrom/fieldRef under the map form.
+Left alone that renders `value:` with a nested structure and fails far downstream
+in kubectl apply, so name it here instead. */}}
+{{- $envSources := list (dict "path" "envVars" "value" .Values.envVars) -}}
+{{- range $index, $sc := .Values.sidecars -}}
+{{- $envSources = append $envSources (dict "path" (printf "sidecars[%d] (%s).envVars" $index ($sc.name | default "unnamed")) "value" $sc.envVars) -}}
+{{- end -}}
+{{- range $index, $job := .Values.jobs -}}
+{{- $envSources = append $envSources (dict "path" (printf "jobs[%d] (%s).envVars" $index ($job.name | default (printf "job-%d" $index))) "value" $job.envVars) -}}
+{{- end -}}
+{{- range $src := $envSources -}}
+{{- if kindIs "map" $src.value -}}
+{{- range $name, $value := $src.value -}}
+{{- if or (kindIs "map" $value) (kindIs "slice" $value) }}
+{{- fail (printf "%s uses the map form, but key %q has a %s value instead of a scalar: the map form only carries plain values. Use the list form ([{name: %s, valueFrom: ...}]) for valueFrom, fieldRef, secretKeyRef or resourceFieldRef." $src.path $name (kindOf $value) $name) }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $svcPort := (include "helm-framework.values.service.port" .) -}}
 {{- $seenNames := dict -}}
 {{- $seenPorts := dict (toString $svcPort) "service.port (main container)" -}}
