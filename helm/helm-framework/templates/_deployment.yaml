@@ -35,7 +35,10 @@ spec:
         checksum/service: {{ .Values.service | default dict | toYaml | sha256sum }}
         checksum/tls: {{ .Values.tls | default dict | toYaml | sha256sum }}
         checksum/extra-secret-env: {{ .Values.envVarsFromSecret | default dict | toYaml | sha256sum }}
-        checksum/extra-env: {{ .Values.envVars | default list | toYaml | sha256sum }}
+        {{- /* Hash the normalized list, not the raw value: the map and list shapes
+        must produce the same checksum for the same set of variables, so converting
+        a chart from one shape to the other does not roll every pod for no reason. */}}
+        checksum/extra-env: {{ include "helm-framework.envVars.list" .Values.envVars | sha256sum }}
         checksum/sidecars: {{ .Values.sidecars | default list | toYaml | sha256sum }}
       {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -158,9 +161,9 @@ spec:
             {{- end }}
             {{- end }}
           {{- include "helm-framework.probes" (dict "healthChecks" .Values.healthChecks "portName" "http" "scheme" (include "helm-framework.values.service.targetScheme" .)) | nindent 10 }}
-          {{- with .Values.envVars }}
+          {{- with include "helm-framework.envVars.list" .Values.envVars }}
           env:
-            {{- toYaml . | nindent 12 }}
+            {{- . | nindent 12 }}
           {{- end }}
           {{- if .Values.envVarsFromSecret }}
           envFrom:

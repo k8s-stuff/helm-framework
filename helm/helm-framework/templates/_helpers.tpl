@@ -115,6 +115,43 @@ Secret name for a sidecar's envVarsFromSecret. Expects a dict: { root, name }.
 {{- end }}
 
 {{/*
+Canonical `env` list for any of the chart's envVars keys. Every consumer goes
+through this so the two accepted shapes behave identically everywhere:
+
+  envVars:                    envVars:
+    - name: TZ                  TZ: Europe/Stockholm
+      value: Europe/Stockholm
+
+The list form is passed through untouched — it is the only shape that can carry
+`valueFrom`, and its authored order is preserved. The map form is emitted sorted
+by name (Go template map iteration), and its values are coerced to strings,
+since a container's env value must be a string and `PORT: 8080` is the obvious
+thing to write. The map form exists because Helm replaces lists wholesale when
+merging values files but merges maps key by key, so a deployment-time overlay
+can add, override or (with a null value) drop a single variable without
+restating the chart's whole list.
+
+Expects the raw value of an envVars key. Renders a YAML array, or nothing at all
+when there are no variables — callers use `with` to decide whether to emit the
+`env:` key, and can `fromYamlArray` the result when they need to merge further.
+*/}}
+{{- define "helm-framework.envVars.list" -}}
+{{- if kindIs "map" . -}}
+{{- $env := list -}}
+{{- range $name, $value := . -}}
+{{- $env = append $env (dict "name" $name "value" (toString $value)) -}}
+{{- end -}}
+{{- if $env -}}
+{{- toYaml $env -}}
+{{- end -}}
+{{- else -}}
+{{- with . -}}
+{{- toYaml . -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Plain `env` list for a sidecar container: the release-wide envVars, minus every name
 the sidecar redefines, followed by the sidecar's own envVars. Names the sidecar
 sources from its own Secret are dropped from the list too — a container's `env`
@@ -124,20 +161,22 @@ Renders nothing when the sidecar ends up with no plain env vars at all.
 */}}
 {{- define "helm-framework.sidecar.env" -}}
 {{- $sc := .sidecar -}}
+{{- $scEnv := include "helm-framework.envVars.list" $sc.envVars | fromYamlArray -}}
+{{- $rootEnv := include "helm-framework.envVars.list" .root.Values.envVars | fromYamlArray -}}
 {{- $overridden := dict -}}
-{{- range $sc.envVars -}}
+{{- range $scEnv -}}
 {{- $_ := set $overridden .name true -}}
 {{- end -}}
 {{- range $key, $value := ($sc.envVarsFromSecret | default dict) -}}
 {{- $_ := set $overridden $key true -}}
 {{- end -}}
 {{- $env := list -}}
-{{- range .root.Values.envVars -}}
+{{- range $rootEnv -}}
 {{- if not (hasKey $overridden .name) -}}
 {{- $env = append $env . -}}
 {{- end -}}
 {{- end -}}
-{{- range $sc.envVars -}}
+{{- range $scEnv -}}
 {{- $env = append $env . -}}
 {{- end -}}
 {{- if $env -}}

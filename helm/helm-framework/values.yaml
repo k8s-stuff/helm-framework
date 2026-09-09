@@ -769,7 +769,8 @@ jobs: []
 #    resources: {}
 #    volumes: []
 #    volumeMounts: []
-#    envVars: []              # plain env vars (list of {name, value})
+#    envVars: []              # plain env vars; list of {name, value} or map of NAME: value
+#                             # (same two shapes as the top-level envVars key)
 #    envFrom: []              # raw envFrom sources (secretRef/configMapRef)
 
 # =============================================================================
@@ -923,7 +924,8 @@ sidecars: []
 #    appSettings: {}
 #    # Sidecars inherit the release-wide `envVars` / `envVarsFromSecret`. The two keys
 #    # below add to that set, and win over the release-wide value on a name collision.
-#    envVars: []             # plain env vars (list of {name, value}); same shape as top-level envVars
+#    envVars: []             # plain env vars; list of {name, value} or map of NAME: value,
+#                            # the same two shapes as the top-level envVars key
 #    envVarsFromSecret: {}   # map of key: value, rendered into a per-sidecar Secret
 
 # =============================================================================
@@ -938,7 +940,26 @@ helmFrameworkSettings:
 
 # -- App configuration rendered into a Secret and mounted as the config file.
 appSettings: {}
-# -- Plain environment variables (list of {name, value}), applied to the main and sidecar containers. A sidecar's own `envVars`/`envVarsFromSecret` override these per name. Set proxy vars (HTTPS_PROXY, NO_PROXY, ...) here too.
+# Two shapes are accepted, and the choice matters at deployment time:
+#
+#   envVars:                       envVars:
+#     - name: TZ                     TZ: Europe/Stockholm
+#       value: Europe/Stockholm      HTTPS_PROXY: webproxy:3128
+#
+# Helm replaces lists wholesale when it merges values files, but merges maps key
+# by key. So with the list form, an overlay values file passed at deploy time has
+# to restate every variable the chart already sets just to add one of its own —
+# and silently drops the chart's set if it forgets. With the map form the overlay
+# adds a key, overrides a key (last file wins), or drops one (set it to null),
+# and leaves the rest of the chart's set alone.
+#
+# The list form is the only one that can carry `valueFrom` (fieldRef,
+# secretKeyRef, resourceFieldRef), and it preserves the order you wrote. The map
+# form renders sorted by name and coerces values to strings, so `PORT: 8080` is
+# fine. Mixing the shapes across values files does NOT merge — a map in the
+# overlay replaces a list in the chart outright — so pick one shape per chart and
+# use it in every file that sets this key.
+# -- Plain environment variables, applied to the main and sidecar containers. Two shapes are accepted: a list of `{name, value}`, the only shape that can carry `valueFrom`, which a values file passed at deploy time replaces wholesale; or a map of `NAME: value`, which merges key by key across values files, so an overlay can add a variable, override one (last file wins) or drop one (set it to null) without restating the chart's whole set. The map form renders sorted by name and coerces values to strings. Mixing the shapes across files does not merge — a map in the overlay replaces a list in the chart outright — so use one shape in every file that sets this key. A sidecar's own `envVars`/`envVarsFromSecret` override these per name. Set proxy vars (HTTPS_PROXY, NO_PROXY, ...) here too.
 envVars: []
 # -- Environment variables sourced from a Secret (map of key: value), applied to the main and sidecar containers. A sidecar's own `envVars`/`envVarsFromSecret` override these per key.
 envVarsFromSecret: {}
