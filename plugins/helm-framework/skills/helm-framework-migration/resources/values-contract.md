@@ -36,7 +36,9 @@ is **not** in this list is not read by the library, full stop.
 - `initContainers`
 - `jobs`
 - `keda`
+- `lifecycle`
 - `liquibase`
+- `minReadySeconds`
 - `nameOverride`
 - `nodeSelector`
 - `podAnnotations`
@@ -52,6 +54,7 @@ is **not** in this list is not read by the library, full stop.
 - `serviceAccount`
 - `sidecars`
 - `strategy`
+- `terminationGracePeriodSeconds`
 - `tls`
 - `tolerations`
 - `verticalPodAutoscaler`
@@ -184,6 +187,7 @@ not for authorizing deletion.
 - `keda.triggerAuthentication.name`
 - `keda.triggerAuthentication.podIdentity`
 - `keda.triggerAuthentication.secretTargetRef`
+- `lifecycle`
 - `liquibase`
 - `liquibase.args`
 - `liquibase.backoffLimit`
@@ -223,6 +227,7 @@ not for authorizing deletion.
 - `liquibase.volumeMounts`
 - `liquibase.volumes`
 - `liquibase.waitForIt`
+- `minReadySeconds`
 - `nameOverride`
 - `nodeSelector`
 - `podAnnotations`
@@ -262,6 +267,7 @@ not for authorizing deletion.
 - `serviceAccount.name`
 - `sidecars`
 - `strategy`
+- `terminationGracePeriodSeconds`
 - `tls`
 - `tls.certFile`
 - `tls.enabled`

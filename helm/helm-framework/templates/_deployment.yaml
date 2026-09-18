@@ -19,6 +19,12 @@ spec:
   strategy:
     {{- . | toYaml | nindent 4 }}
   {{- end }}
+  {{- /* `kindIs "invalid"` rather than `with`: 0 is a meaningful, explicitly
+  settable value here (it is the Kubernetes default), and `with` would treat it
+  as unset. Only nil — the key absent, or present but null — omits the field. */}}
+  {{- if not (kindIs "invalid" .Values.minReadySeconds) }}
+  minReadySeconds: {{ .Values.minReadySeconds }}
+  {{- end }}
   template:
     metadata:
       annotations:
@@ -49,6 +55,12 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      {{- /* Same nil-vs-zero reasoning as minReadySeconds above: 0 means "kill
+      immediately, skip the grace period", which is a real (if drastic) choice,
+      so only an absent/null value falls back to the Kubernetes default of 30. */}}
+      {{- if not (kindIs "invalid" .Values.terminationGracePeriodSeconds) }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -161,6 +173,13 @@ spec:
             {{- end }}
             {{- end }}
           {{- include "helm-framework.probes" (dict "healthChecks" .Values.healthChecks "portName" "http" "scheme" (include "helm-framework.values.service.targetScheme" .)) | nindent 10 }}
+          {{- /* Main container only — sidecars have no lifecycle key. A preStop
+          hook here covers the window between SIGTERM and an external load
+          balancer finishing deregistration; see the values.yaml note. */}}
+          {{- with .Values.lifecycle }}
+          lifecycle:
+            {{- tpl (toYaml .) $ | nindent 12 }}
+          {{- end }}
           {{- with include "helm-framework.envVars.list" .Values.envVars }}
           env:
             {{- . | nindent 12 }}
