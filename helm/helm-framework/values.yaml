@@ -22,6 +22,35 @@ strategy: {}
   # rollingUpdate:
   #   maxSurge: 0
   #   maxUnavailable: 1
+# -- Seconds a new pod must stay Ready before a rolling update counts it as
+# available and may delete an old one (spec.minReadySeconds). Omitted when
+# unset, which leaves the Kubernetes default of 0: the rollout tears down the
+# old pod the instant the new one first reports Ready. That is too early
+# whenever something outside the cluster still has to accept the pod — an AWS
+# ALB registering a new IP target and waiting for its own health check to pass,
+# for example — because for that window the new pod is Ready to Kubernetes and
+# unusable to the load balancer, while the old pod is already gone. Set this to
+# cover that registration window.
+minReadySeconds: 0
+# -- Seconds between SIGTERM and SIGKILL for the whole pod
+# (spec.template.spec.terminationGracePeriodSeconds). Omitted when unset, which
+# leaves the Kubernetes default of 30. It also bounds `lifecycle` hooks: the
+# clock starts at SIGTERM, so a preStop hook is cut short by the SIGKILL if it
+# outlasts this. Keep it above the preStop drain plus the application's own
+# shutdown time.
+terminationGracePeriodSeconds: 30
+# -- Lifecycle hooks for the MAIN container (containers[].lifecycle), rendered
+# through `tpl` so hook commands may reference other values. Mainly a preStop
+# hook: Kubernetes removes a terminating pod from the Service endpoints and
+# sends SIGTERM at the same moment, so anything routing to pods directly rather
+# than through the Service — an ALB with IP targets, say — keeps sending
+# requests for however long its own deregistration takes. A preStop sleep holds
+# the container open across that gap so those requests are still served. Keep
+# the sleep under terminationGracePeriodSeconds above. Sidecars are unaffected.
+lifecycle: {}
+  # preStop:
+  #   exec:
+  #     command: ["/bin/sh", "-c", "sleep 20"]
 
 # -- Override the chart name used in resource names and labels.
 nameOverride: ""

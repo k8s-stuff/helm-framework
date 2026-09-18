@@ -11,6 +11,15 @@ strategy: {}
   #   maxSurge: 0
   #   maxUnavailable: 1
 
+# Rollout and shutdown timing. All three are omitted from the rendered
+# Deployment while unset, leaving the Kubernetes defaults (0 / 30 / no hooks).
+# minReadySeconds: 30
+# terminationGracePeriodSeconds: 60
+lifecycle: {}
+  # preStop:
+  #   exec:
+  #     command: ["/bin/sh", "-c", "sleep 20"]
+
 # Naming overrides
 nameOverride: "helm-framework-test-template"
 fullnameOverride: ""
