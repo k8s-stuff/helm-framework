@@ -38,6 +38,7 @@ helm.sh/chart: {{ include "helm-framework.chart" . }}
 {{ include "helm-framework.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- /* Legacy bare `app` label kept only because helm-framework.values.affinity's podAntiAffinity selector matches on it. */}}
