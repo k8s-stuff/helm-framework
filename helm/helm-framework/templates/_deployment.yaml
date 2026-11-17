@@ -10,7 +10,9 @@ metadata:
     {{- include "helm-framework.labels" . | nindent 4 }}
 spec:
   {{- if and (not (.Values.horizontalPodAutoscaler).enabled) (not (.Values.keda).enabled) }}
-  replicas: {{ .Values.replicaCount | default 1 }}
+  {{- /* Not `default 1`: Helm's default treats 0 as empty, so scaling to zero
+  would silently render 1. Only nil (key absent or null) falls back to 1. */}}
+  replicas: {{ if kindIs "invalid" .Values.replicaCount }}1{{ else }}{{ .Values.replicaCount }}{{ end }}
   {{- end }}
   selector:
     matchLabels:
